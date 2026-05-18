@@ -217,7 +217,7 @@ span {
 .workspace {
   min-width: 0;
   display: grid;
-  grid-template-rows: auto minmax(300px, 1fr) auto;
+  grid-template-rows: auto auto minmax(300px, 1fr) auto;
 }
 
 .topbar {
@@ -241,6 +241,77 @@ span {
   font-size: 13px;
   color: var(--green);
   font-weight: 700;
+}
+
+.progress-band {
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  padding: 12px 24px;
+}
+
+.progress-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.progress-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.progress-item {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
+  padding: 9px 10px;
+}
+
+.progress-item.active {
+  border-color: rgba(178, 138, 66, 0.7);
+  background: #fffaf0;
+}
+
+.progress-item.ready {
+  border-color: rgba(23, 70, 58, 0.45);
+}
+
+.progress-item.error {
+  border-color: rgba(168, 79, 61, 0.6);
+  background: #fff6f3;
+}
+
+.progress-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--brass);
+}
+
+.progress-item.ready .progress-dot {
+  background: var(--green);
+}
+
+.progress-item.error .progress-dot {
+  background: var(--clay);
+}
+
+.progress-item strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.progress-item span:last-child {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
 }
 
 .gallery-band {
@@ -295,12 +366,33 @@ span {
   box-shadow: var(--shadow);
 }
 
+.photo-card.working {
+  border-color: rgba(178, 138, 66, 0.75);
+}
+
+.photo-image-wrap {
+  position: relative;
+  background: #ecefeb;
+}
+
 .photo-card img {
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
   display: block;
   background: #ecefeb;
+}
+
+.photo-progress-chip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  border-radius: 999px;
+  background: rgba(28, 29, 32, 0.82);
+  color: white;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 9px;
 }
 
 .photo-card-body {
@@ -342,6 +434,12 @@ span {
 .segmented button.active {
   background: var(--green);
   color: white;
+}
+
+.segmented button:disabled {
+  color: #9a9f9a;
+  background: #f1f2ef;
+  cursor: not-allowed;
 }
 
 .chat-band {

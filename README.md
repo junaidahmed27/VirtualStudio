@@ -9,6 +9,7 @@ A Railway-ready chat app for staging empty NYC apartment photos with multiple Op
 - Synthesizes one coherent apartment-wide staging theme.
 - Edits each image with consistent furniture, art, lighting, and accessories while preserving fixed architecture.
 - Accepts customer feedback turns and re-edits the set.
+- Shows a live progress timeline for planning, image generation, retries, completion, and failures.
 - Stores reusable feedback as durable memory so future sessions avoid repeated mistakes.
 - Loads checked-in Units #1-#5 before/after exemplar memory so every new job starts with a broader baseline taste profile and fixed-layout constraints.
 - Distills completed usage into reusable server-side training examples, then feeds those lessons back into future planning prompts.

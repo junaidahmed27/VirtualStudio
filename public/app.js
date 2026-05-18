@@ -16,6 +16,7 @@ const els = {
   refreshMemory: document.querySelector("#refreshMemory"),
   sessionSummary: document.querySelector("#sessionSummary"),
   statusPill: document.querySelector("#statusPill"),
+  progressList: document.querySelector("#progressList"),
   gallery: document.querySelector("#gallery"),
   messages: document.querySelector("#messages"),
   chatForm: document.querySelector("#chatForm"),
@@ -101,23 +102,65 @@ function renderMessages(turns = []) {
   els.messages.scrollTop = els.messages.scrollHeight;
 }
 
-function photoImage(photo) {
-  const mode = state.visibleMode.get(photo.id) || "latest";
-  if (mode === "original") return photo.original_data_url;
-  return photo.latest_data_url || photo.original_data_url;
+function renderProgress(progress = [], status = "idle") {
+  els.progressList.innerHTML = "";
+  const events = [...progress].slice(-14);
+  if (!events.length) {
+    const empty = document.createElement("div");
+    empty.className = "progress-empty";
+    empty.textContent = status === "idle"
+      ? "Progress updates will appear here once a staging session starts."
+      : "Preparing the staging job.";
+    els.progressList.append(empty);
+    return;
+  }
+
+  events.forEach((event, index) => {
+    const item = document.createElement("div");
+    const stage = event.meta?.stage || "";
+    item.className = `progress-item ${stage}`;
+    if (index === events.length - 1 && !["ready", "error"].includes(status)) item.classList.add("active");
+
+    const dot = document.createElement("span");
+    dot.className = "progress-dot";
+
+    const text = document.createElement("div");
+    const message = document.createElement("strong");
+    message.textContent = event.message || "Working";
+    const stamp = document.createElement("span");
+    stamp.textContent = event.created_at
+      ? new Date(event.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : "";
+    text.append(message, stamp);
+    item.append(dot, text);
+    els.progressList.append(item);
+  });
 }
 
-function renderGallery(photos = []) {
+function renderGallery(photos = [], sessionStatus = "idle") {
   if (!photos.length) return;
   els.gallery.className = "gallery";
   els.gallery.innerHTML = "";
+  const isRunning = ["queued", "planning", "editing"].includes(sessionStatus);
   for (const photo of photos) {
     const card = document.createElement("article");
     card.className = "photo-card";
+    const hasStaged = Boolean(photo.latest_data_url);
+    const mode = hasStaged ? state.visibleMode.get(photo.id) || "latest" : "original";
+    if (!hasStaged && isRunning) card.classList.add("working");
 
+    const media = document.createElement("div");
+    media.className = "photo-image-wrap";
     const img = document.createElement("img");
-    img.src = photoImage(photo);
+    img.src = mode === "original" ? photo.original_data_url : photo.latest_data_url;
     img.alt = photo.room_label || photo.name;
+    media.append(img);
+    if (!hasStaged) {
+      const chip = document.createElement("div");
+      chip.className = "photo-progress-chip";
+      chip.textContent = isRunning ? "Working" : "No staged image";
+      media.append(chip);
+    }
 
     const body = document.createElement("div");
     body.className = "photo-card-body";
@@ -127,7 +170,11 @@ function renderGallery(photos = []) {
     const title = document.createElement("strong");
     title.textContent = photo.room_label || photo.name;
     const count = document.createElement("span");
-    count.textContent = `${(photo.edit_history || []).length} edits`;
+    count.textContent = hasStaged
+      ? "Staged ready"
+      : isRunning
+        ? "Waiting for edit"
+        : `${(photo.edit_history || []).length} attempts`;
     titleRow.append(title, count);
 
     const segmented = document.createElement("div");
@@ -137,10 +184,10 @@ function renderGallery(photos = []) {
     before.textContent = "Before";
     const staged = document.createElement("button");
     staged.type = "button";
-    staged.textContent = "Staged";
-    const mode = state.visibleMode.get(photo.id) || "latest";
+    staged.textContent = hasStaged ? "Staged" : "Working";
+    staged.disabled = !hasStaged;
     before.classList.toggle("active", mode === "original");
-    staged.classList.toggle("active", mode !== "original");
+    staged.classList.toggle("active", hasStaged && mode !== "original");
     before.addEventListener("click", () => {
       state.visibleMode.set(photo.id, "original");
       img.src = photo.original_data_url;
@@ -148,15 +195,16 @@ function renderGallery(photos = []) {
       staged.classList.remove("active");
     });
     staged.addEventListener("click", () => {
+      if (!hasStaged) return;
       state.visibleMode.set(photo.id, "latest");
-      img.src = photo.latest_data_url || photo.original_data_url;
+      img.src = photo.latest_data_url;
       staged.classList.add("active");
       before.classList.remove("active");
     });
     segmented.append(before, staged);
 
     body.append(titleRow, segmented);
-    card.append(img, body);
+    card.append(media, body);
     els.gallery.append(card);
   }
 }
@@ -166,7 +214,8 @@ function renderSession(session) {
   setStatus(session.status);
   els.sessionSummary.textContent = session.plan?.summary || "The staging agents are working through layout, theme, and edits.";
   renderMessages(session.turns || []);
-  renderGallery(session.photos || []);
+  renderProgress(session.progress || [], session.status);
+  renderGallery(session.photos || [], session.status);
 }
 
 async function pollSession() {

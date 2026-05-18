@@ -152,7 +152,7 @@ class JsonStore {
     try {
       this.db = JSON.parse(await fs.readFile(LOCAL_DB_PATH, "utf8"));
     } catch {
-      this.db = { sessions: [], turns: [], photos: [], memories: [], usage_examples: [] };
+      this.db = { sessions: [], turns: [], photos: [], memories: [], usage_examples: [], progress_events: [] };
       await this.save();
     }
     if (!Array.isArray(this.db.sessions)) this.db.sessions = [];
@@ -160,6 +160,7 @@ class JsonStore {
     if (!Array.isArray(this.db.photos)) this.db.photos = [];
     if (!Array.isArray(this.db.memories)) this.db.memories = [];
     if (!Array.isArray(this.db.usage_examples)) this.db.usage_examples = [];
+    if (!Array.isArray(this.db.progress_events)) this.db.progress_events = [];
   }
 
   async save() {
@@ -202,7 +203,8 @@ class JsonStore {
     return {
       ...session,
       photos: this.db.photos.filter((row) => row.session_id === sessionId),
-      turns: this.db.turns.filter((row) => row.session_id === sessionId)
+      turns: this.db.turns.filter((row) => row.session_id === sessionId),
+      progress: this.db.progress_events.filter((row) => row.session_id === sessionId)
     };
   }
 
@@ -223,6 +225,19 @@ class JsonStore {
       created_at: nowIso()
     });
     await this.save();
+  }
+
+  async addProgress(sessionId, message, meta = {}) {
+    const event = {
+      id: id("evt"),
+      session_id: sessionId,
+      message,
+      meta,
+      created_at: nowIso()
+    };
+    this.db.progress_events.push(event);
+    await this.save();
+    return event;
   }
 
   async updatePhoto(photoId, patch) {
@@ -375,6 +390,13 @@ class PgStore {
         updated_at timestamptz not null default now(),
         unique (source_session_id, source_turn_count)
       );
+      create table if not exists progress_events (
+        id text primary key,
+        session_id text not null references sessions(id) on delete cascade,
+        message text not null,
+        meta jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
     `);
   }
 
@@ -413,7 +435,8 @@ class PgStore {
     if (!session.rows[0]) return null;
     const photos = await this.pool.query("select * from photos where session_id = $1 order by created_at asc", [sessionId]);
     const turns = await this.pool.query("select * from turns where session_id = $1 order by created_at asc", [sessionId]);
-    return { ...session.rows[0], photos: photos.rows, turns: turns.rows };
+    const progress = await this.pool.query("select * from progress_events where session_id = $1 order by created_at asc", [sessionId]);
+    return { ...session.rows[0], photos: photos.rows, turns: turns.rows, progress: progress.rows };
   }
 
   async updateSession(sessionId, patch) {
@@ -436,6 +459,16 @@ class PgStore {
       "insert into turns (id, session_id, role, content, meta) values ($1, $2, $3, $4, $5)",
       [id("turn"), sessionId, role, content, meta]
     );
+  }
+
+  async addProgress(sessionId, message, meta = {}) {
+    const result = await this.pool.query(
+      `insert into progress_events (id, session_id, message, meta)
+       values ($1, $2, $3, $4)
+       returning *`,
+      [id("evt"), sessionId, message, meta]
+    );
+    return result.rows[0];
   }
 
   async updatePhoto(photoId, patch) {
@@ -539,6 +572,16 @@ class PgStore {
 }
 
 const store = process.env.DATABASE_URL ? new PgStore() : new JsonStore();
+
+async function recordProgress(sessionId, message, meta = {}) {
+  logSession(sessionId, "progress", { progress_message: message, ...meta });
+  try {
+    return await store.addProgress(sessionId, message, meta);
+  } catch (error) {
+    console.error(`Could not store progress for ${sessionId}: ${error.message}`);
+    return null;
+  }
+}
 
 async function loadTrainingMemory() {
   try {
@@ -734,16 +777,24 @@ async function runAgent(role, session, memories, usageExamples, feedback) {
   if (OPENAI_AGENT_IMAGE_INPUTS) content.push(...imageInputs(session.photos));
 
   try {
-    logSession(session.id, "planning_agent_started", { role, image_inputs: OPENAI_AGENT_IMAGE_INPUTS });
+    await recordProgress(session.id, `Planning agent started: ${role}.`, {
+      stage: "planning",
+      role,
+      image_inputs: OPENAI_AGENT_IMAGE_INPUTS
+    });
     const response = await safeResponses(responsePayload({
       model: TEXT_MODEL,
       input: [{ role: "user", content }],
       maxOutputTokens: 6000
     }), { responseTimeoutMs: OPENAI_AGENT_TIMEOUT_MS });
-    logSession(session.id, "planning_agent_completed", { role });
+    await recordProgress(session.id, `Planning agent finished: ${role}.`, { stage: "planning", role });
     return { role, text: extractText(response) };
   } catch (error) {
-    logSession(session.id, "planning_agent_failed", { role, error: error.message });
+    await recordProgress(session.id, `Planning agent timed out; using conservative defaults for ${role}.`, {
+      stage: "planning",
+      role,
+      error: error.message
+    });
     return {
       role,
       text: [
@@ -815,7 +866,10 @@ async function synthesizePlan(session, agentOutputs, memories, usageExamples, fe
     }), { responseTimeoutMs: OPENAI_SYNTHESIS_TIMEOUT_MS });
     return parseJsonish(extractText(response), fallbackPlan(session, feedback));
   } catch (error) {
-    logSession(session.id, "plan_synthesis_failed", { error: error.message });
+    await recordProgress(session.id, "Plan synthesis timed out; using the safe staging fallback plan.", {
+      stage: "planning",
+      error: error.message
+    });
     return fallbackPlan(session, feedback);
   }
 }
@@ -832,10 +886,17 @@ async function generatePlan(session, feedback) {
     "NYC leasing photographer focused on buyer impact, light, spaciousness, and listing appeal",
     "practical staging critic focused on realism, furniture scale, blocked windows, blocked doors, and avoidable customer complaints"
   ];
-  logSession(session.id, "planning_started", { photos: session.photos.length, roles: roles.length });
+  await recordProgress(session.id, "Design agents are building a cohesive apartment-wide staging plan.", {
+    stage: "planning",
+    photos: session.photos.length,
+    roles: roles.length
+  });
   const agentOutputs = await Promise.all(roles.map((role) => runAgent(role, session, memories, usageExamples, feedback)));
   const plan = await synthesizePlan(session, agentOutputs, memories, usageExamples, feedback);
-  logSession(session.id, "planning_completed", { per_photo: plan.per_photo?.length || 0 });
+  await recordProgress(session.id, "Design plan is ready. Moving to image generation.", {
+    stage: "planning",
+    per_photo: plan.per_photo?.length || 0
+  });
   return plan;
 }
 
@@ -861,7 +922,7 @@ function editPrompt(plan, item, feedback) {
 }
 
 async function generatePhotoEdit(photo, plan, item, feedback) {
-  if (!OPENAI_API_KEY) return "";
+  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
   const content = [
     { type: "input_text", text: editPrompt(plan, item, feedback) },
     { type: "input_image", image_url: photo.latest_data_url || photo.original_data_url, detail: "high" }
@@ -894,7 +955,12 @@ async function generateEdits(session, plan, feedback) {
     const item = photoPlan(plan, photo, index);
     const editHistory = Array.isArray(photo.edit_history) ? photo.edit_history : [];
     try {
-      logSession(session.id, "photo_edit_started", { photo_id: photo.id, photo_index: index + 1 });
+      await recordProgress(session.id, `Creating staged image ${index + 1} of ${session.photos.length}.`, {
+        stage: "editing",
+        photo_id: photo.id,
+        photo_index: index + 1,
+        total_photos: session.photos.length
+      });
       const latest = await generatePhotoEdit(photo, plan, item, feedback);
       await store.updatePhoto(photo.id, {
         latest_data_url: latest,
@@ -909,7 +975,12 @@ async function generateEdits(session, plan, feedback) {
           }
         ]
       });
-      logSession(session.id, "photo_edit_completed", { photo_id: photo.id, photo_index: index + 1 });
+      await recordProgress(session.id, `Staged image ${index + 1} of ${session.photos.length} is ready.`, {
+        stage: "editing",
+        photo_id: photo.id,
+        photo_index: index + 1,
+        total_photos: session.photos.length
+      });
       results.push({ photo_id: photo.id, generated: true });
     } catch (error) {
       await store.updatePhoto(photo.id, {
@@ -925,7 +996,13 @@ async function generateEdits(session, plan, feedback) {
           }
         ]
       });
-      logSession(session.id, "photo_edit_failed", { photo_id: photo.id, photo_index: index + 1, error: error.message });
+      await recordProgress(session.id, `Staged image ${index + 1} failed: ${error.message}`, {
+        stage: "editing",
+        photo_id: photo.id,
+        photo_index: index + 1,
+        total_photos: session.photos.length,
+        error: error.message
+      });
       results.push({ photo_id: photo.id, generated: false, error: error.message });
     }
   }
@@ -1067,12 +1144,20 @@ async function processSession(sessionId, feedback = "") {
   if (jobs.has(sessionId)) return;
   jobs.add(sessionId);
   try {
-    logSession(sessionId, "job_started", { feedback: Boolean(feedback) });
+    await recordProgress(sessionId, feedback
+      ? "Received your feedback. Restarting the staging workflow."
+      : "Received the photos and brief. Starting the staging workflow.", {
+        stage: "queued",
+        feedback: Boolean(feedback)
+      });
     await store.updateSession(sessionId, { status: "planning" });
     let session = await store.getSession(sessionId);
     const plan = await generatePlan(session, feedback);
     await store.updateSession(sessionId, { status: "editing", plan });
-    logSession(sessionId, "editing_started", { photos: session.photos.length });
+    await recordProgress(sessionId, "The app is now producing staged pictures.", {
+      stage: "editing",
+      photos: session.photos.length
+    });
     await store.addTurn(sessionId, "assistant", plan.customer_reply || plan.summary || "I created the staging plan.", {
       kind: feedback ? "feedback_plan" : "initial_plan",
       plan
@@ -1081,7 +1166,8 @@ async function processSession(sessionId, feedback = "") {
     const editResults = await generateEdits(session, plan, feedback);
     if (feedback) await deriveDurableMemory(sessionId, feedback);
     await store.updateSession(sessionId, { status: "ready" });
-    logSession(sessionId, "job_ready", {
+    await recordProgress(sessionId, "Staging run complete. Review the generated images below.", {
+      stage: "ready",
       generated: editResults.filter((result) => result.generated).length,
       failed: editResults.filter((result) => !result.generated).length
     });
@@ -1089,7 +1175,10 @@ async function processSession(sessionId, feedback = "") {
       console.error(`Usage learning failed for ${sessionId}: ${error.message}`);
     });
   } catch (error) {
-    logSession(sessionId, "job_failed", { error: error.message });
+    await recordProgress(sessionId, `Generation failed: ${error.message}`, {
+      stage: "error",
+      error: error.message
+    });
     await store.addTurn(sessionId, "assistant", `Generation failed: ${error.message}`, {
       kind: "error"
     });
@@ -1103,7 +1192,10 @@ async function resumeRunnableSessions() {
   if (!RESUME_ACTIVE_SESSIONS_LIMIT) return;
   const sessions = await store.listRunnableSessions(RESUME_ACTIVE_SESSIONS_LIMIT);
   for (const session of sessions) {
-    logSession(session.id, "resuming_active_session", { previous_status: session.status });
+    await recordProgress(session.id, "Resuming this staging job after a deployment restart.", {
+      stage: "queued",
+      previous_status: session.status
+    });
     processSession(session.id).catch((error) => {
       logSession(session.id, "resume_failed", { error: error.message });
     });
