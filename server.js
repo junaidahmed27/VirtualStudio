@@ -20,6 +20,8 @@ const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT || "xhigh";
 const OPENAI_BACKGROUND_MODE = (process.env.OPENAI_BACKGROUND_MODE || "true").toLowerCase() !== "false";
 const OPENAI_POLL_INTERVAL_MS = Number(process.env.OPENAI_POLL_INTERVAL_MS || 2500);
 const OPENAI_RESPONSE_TIMEOUT_MS = Number(process.env.OPENAI_RESPONSE_TIMEOUT_MS || 12 * 60 * 1000);
+const OPENAI_DEFAULT_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_DEFAULT_MAX_OUTPUT_TOKENS || 8000);
+const OPENAI_RETRY_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_RETRY_MAX_OUTPUT_TOKENS || 16000);
 const MAX_IMAGE_COUNT = Number(process.env.MAX_IMAGE_COUNT || 8);
 const MAX_JSON_BODY_BYTES = Number(process.env.MAX_JSON_BODY_BYTES || 32 * 1024 * 1024);
 const AUTO_LEARN_FROM_USAGE = (process.env.AUTO_LEARN_FROM_USAGE || "true").toLowerCase() !== "false";
@@ -574,7 +576,7 @@ async function pollOpenAIResponse(initialResponse) {
   return response;
 }
 
-function responsePayload({ model, input, tools, maxOutputTokens = 2500 }) {
+function responsePayload({ model, input, tools, maxOutputTokens = OPENAI_DEFAULT_MAX_OUTPUT_TOKENS }) {
   const payload = {
     model,
     input,
@@ -590,15 +592,30 @@ function responsePayload({ model, input, tools, maxOutputTokens = 2500 }) {
 }
 
 async function safeResponses(payload) {
-  try {
-    return await openaiResponses(payload);
-  } catch (error) {
-    if (payload.reasoning && /reasoning|effort|unsupported/i.test(error.message)) {
-      const retry = { ...payload };
-      delete retry.reasoning;
-      return openaiResponses(retry);
+  let current = { ...payload };
+  let removedReasoning = false;
+  while (true) {
+    try {
+      return await openaiResponses(current);
+    } catch (error) {
+      if (!removedReasoning && current.reasoning && /reasoning|effort|unsupported/i.test(error.message)) {
+        current = { ...current };
+        delete current.reasoning;
+        removedReasoning = true;
+        continue;
+      }
+      if (/max_output_tokens/i.test(error.message) && current.max_output_tokens < OPENAI_RETRY_MAX_OUTPUT_TOKENS) {
+        current = {
+          ...current,
+          max_output_tokens: Math.min(
+            OPENAI_RETRY_MAX_OUTPUT_TOKENS,
+            Math.max(current.max_output_tokens * 2, OPENAI_DEFAULT_MAX_OUTPUT_TOKENS)
+          )
+        };
+        continue;
+      }
+      throw error;
     }
-    throw error;
   }
 }
 
@@ -685,7 +702,8 @@ async function runAgent(role, session, memories, usageExamples, feedback) {
         { type: "input_text", text: agentPrompt(role, session.turns.at(-1)?.content || "", memories, usageExamples, feedback) },
         ...imageInputs(session.photos)
       ]
-    }]
+    }],
+    maxOutputTokens: 10000
   }));
   return { role, text: extractText(response) };
 }
@@ -745,7 +763,7 @@ async function synthesizePlan(session, agentOutputs, memories, usageExamples, fe
   const response = await safeResponses(responsePayload({
     model: TEXT_MODEL,
     input: prompt,
-    maxOutputTokens: 4000
+    maxOutputTokens: 12000
   }));
   return parseJsonish(extractText(response), fallbackPlan(session, feedback));
 }
@@ -804,7 +822,7 @@ async function generatePhotoEdit(photo, plan, item, feedback) {
       size: "auto",
       output_format: "jpeg"
     }],
-    maxOutputTokens: 1000
+    maxOutputTokens: 4000
   }));
   const b64 = extractGeneratedImage(response);
   return b64 ? `data:image/jpeg;base64,${b64}` : "";
@@ -856,7 +874,7 @@ async function deriveDurableMemory(sessionId, feedback) {
   const response = await safeResponses(responsePayload({
     model: TEXT_MODEL,
     input: prompt,
-    maxOutputTokens: 700
+    maxOutputTokens: 2500
   }));
   const parsed = parseJsonish(extractText(response), { should_store: false });
   if (!parsed.should_store || !parsed.durable_instruction) return null;
@@ -922,7 +940,7 @@ async function deriveUsageTrainingExample(sessionId, feedback = "", { force = fa
   const response = await safeResponses(responsePayload({
     model: TEXT_MODEL,
     input: prompt,
-    maxOutputTokens: 1800
+    maxOutputTokens: 4000
   }));
   const parsed = parseJsonish(extractText(response), { should_store: false });
   const reusableLessons = cleanStringList(parsed.reusable_lessons, MAX_USAGE_LESSONS_PER_EXAMPLE, 700);
