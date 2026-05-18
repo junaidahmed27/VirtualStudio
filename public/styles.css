@@ -191,12 +191,23 @@ span {
   overflow: auto;
 }
 
+.memory-heading {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .memory-item {
   border-left: 3px solid var(--brass);
   padding: 8px 10px;
   background: #fafaf7;
   font-size: 13px;
   line-height: 1.35;
+}
+
+.memory-item.training {
+  border-left-color: var(--green);
 }
 
 .workspace {

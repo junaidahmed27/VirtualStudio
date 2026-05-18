@@ -8,6 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATA_DIR = path.join(__dirname, "data");
 const LOCAL_DB_PATH = path.join(DATA_DIR, "local-db.json");
+const TRAINING_MEMORY_PATH = process.env.TRAINING_MEMORY_PATH
+  ? path.resolve(process.env.TRAINING_MEMORY_PATH)
+  : path.join(__dirname, "training", "unit-1-style-memory.json");
 
 const PORT = Number(process.env.PORT || 3000);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
@@ -21,6 +24,10 @@ const MAX_IMAGE_COUNT = Number(process.env.MAX_IMAGE_COUNT || 8);
 const MAX_JSON_BODY_BYTES = Number(process.env.MAX_JSON_BODY_BYTES || 32 * 1024 * 1024);
 
 const jobs = new Set();
+let trainingMemory = {
+  name: "No static staging exemplar loaded",
+  durable_lessons: []
+};
 
 function id(prefix) {
   return `${prefix}_${crypto.randomBytes(10).toString("hex")}`;
@@ -380,6 +387,25 @@ class PgStore {
 
 const store = process.env.DATABASE_URL ? new PgStore() : new JsonStore();
 
+async function loadTrainingMemory() {
+  try {
+    const raw = await fs.readFile(TRAINING_MEMORY_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    trainingMemory = {
+      ...parsed,
+      durable_lessons: Array.isArray(parsed.durable_lessons) ? parsed.durable_lessons : []
+    };
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.warn(`Could not load training memory from ${TRAINING_MEMORY_PATH}: ${error.message}`);
+    }
+    trainingMemory = {
+      name: "No static staging exemplar loaded",
+      durable_lessons: []
+    };
+  }
+}
+
 async function openaiResponses(payload) {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not configured");
@@ -476,11 +502,20 @@ function imageInputs(photos) {
 }
 
 function memoryText(memories) {
-  if (!memories.length) return "No durable customer corrections have been learned yet.";
-  return memories
-    .slice(0, 30)
-    .map((memory, index) => `${index + 1}. ${memory.durable_instruction}`)
-    .join("\n");
+  const staticLessons = trainingMemory.durable_lessons || [];
+  const staticText = staticLessons.length
+    ? staticLessons.slice(0, 40).map((lesson, index) => `${index + 1}. ${lesson}`).join("\n")
+    : "No static staging exemplar is configured.";
+  const learnedText = memories.length
+    ? memories
+      .slice(0, 30)
+      .map((memory, index) => `${index + 1}. ${memory.durable_instruction}`)
+      .join("\n")
+    : "No durable customer corrections have been learned yet.";
+  return [
+    `Static Unit #1 before-after exemplar lessons:\n${staticText}`,
+    `Durable customer correction memory:\n${learnedText}`
+  ].join("\n\n");
 }
 
 function agentPrompt(role, brief, memories, feedback) {
@@ -741,8 +776,15 @@ async function handleApi(req, res, pathname) {
     jsonResponse(res, 200, {
       ok: true,
       storage: process.env.DATABASE_URL ? "postgres" : "json",
-      openaiConfigured: Boolean(OPENAI_API_KEY)
+      openaiConfigured: Boolean(OPENAI_API_KEY),
+      trainingExemplar: trainingMemory.name || "",
+      trainingLessons: (trainingMemory.durable_lessons || []).length
     });
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/training") {
+    jsonResponse(res, 200, { training: trainingMemory });
     return;
   }
 
@@ -812,6 +854,7 @@ async function handleApi(req, res, pathname) {
 }
 
 async function main() {
+  await loadTrainingMemory();
   await store.init();
   const server = http.createServer(async (req, res) => {
     try {

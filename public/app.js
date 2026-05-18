@@ -185,13 +185,29 @@ function startPolling() {
 }
 
 async function loadMemory() {
-  const { memories } = await api("/api/memories");
+  const [{ memories }, { training }] = await Promise.all([
+    api("/api/memories"),
+    api("/api/training")
+  ]);
+  const trainingLessons = training?.durable_lessons || [];
   els.memoryList.innerHTML = "";
-  if (!memories.length) {
+  if (!memories.length && !trainingLessons.length) {
     const empty = document.createElement("p");
     empty.textContent = "No corrections stored yet.";
     els.memoryList.append(empty);
     return;
+  }
+  if (trainingLessons.length) {
+    const heading = document.createElement("div");
+    heading.className = "memory-heading";
+    heading.textContent = training.name || "Training exemplar";
+    els.memoryList.append(heading);
+    for (const lesson of trainingLessons.slice(0, 5)) {
+      const item = document.createElement("div");
+      item.className = "memory-item training";
+      item.textContent = lesson;
+      els.memoryList.append(item);
+    }
   }
   for (const memory of memories.slice(0, 8)) {
     const item = document.createElement("div");
@@ -203,9 +219,10 @@ async function loadMemory() {
 
 async function loadHealth() {
   const health = await api("/api/health");
+  const training = health.trainingLessons ? `, ${health.trainingLessons} training lessons` : "";
   els.health.textContent = health.openaiConfigured
-    ? `OpenAI ready, ${health.storage} storage`
-    : `OpenAI key missing, ${health.storage} storage`;
+    ? `OpenAI ready, ${health.storage} storage${training}`
+    : `OpenAI key missing, ${health.storage} storage${training}`;
 }
 
 els.choosePhotos.addEventListener("click", () => els.fileInput.click());

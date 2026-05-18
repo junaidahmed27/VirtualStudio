@@ -1,0 +1,58 @@
+{
+  "name": "Unit #1 before-after staging exemplar",
+  "source": {
+    "local_reference": "Downloads/Unit #1",
+    "note": "The source photos are private local references. The repository stores only distilled reusable staging lessons, not the listing photos or absolute local paths.",
+    "originals": [
+      "shoootin-photo-2-Edit (3).jpg",
+      "shoootin-photo-3-Edit (4).jpg",
+      "shoootin-photo-4-Edit (3).jpg",
+      "shoootin-photo-5-Edit (4).jpg",
+      "shoootin-photo-6-Edit (3).jpg"
+    ],
+    "staged": [
+      "ChatGPT Image May 6, 2026, 02_34_09 PM (1).png",
+      "ChatGPT Image May 6, 2026, 02_36_48 PM (1).png",
+      "ChatGPT Image May 6, 2026, 02_40_17 PM (1).png",
+      "ChatGPT Image May 6, 2026, 02_44_16 PM (1).png",
+      "ChatGPT Image May 6, 2026, 04_06_15 PM (1).png"
+    ]
+  },
+  "summary": "Use Unit #1 as the baseline taste profile for empty NYC apartments: warm modern luxury, high-end but plausible furniture, consistent palette and materials across the entire unit, and strict preservation of fixed architecture.",
+  "durable_lessons": [
+    "Use a cohesive warm modern luxury theme across the apartment: clean white shell, cream and taupe upholstery, dark walnut wood, brass or bronze accents, restrained black details, neutral abstract art, and soft greenery.",
+    "Make the unit feel lavish and spacious through scale discipline: low-profile furniture, large quiet rugs, slim tables, clear negative space, and furniture groupings that leave obvious walkways.",
+    "For bedrooms with white walls and dark wood floors, stage with a low upholstered platform bed, cream bedding, taupe pillows or throw, a large neutral textured rug, walnut nightstands or console, simple beige abstract art, greenery, and warm table or floor lamps.",
+    "When multiple photos show the same bedroom, keep the exact furniture identity, palette, bed placement, art direction, and accessory style consistent across all views.",
+    "For living and dining areas, use a beige sectional or tailored sofa, dark walnut media console, rounded walnut coffee table, large cream rug, compact round dining table with upholstered chairs, warm floor lamp, neutral abstract art, and plants.",
+    "Keep living room circulation practical: do not block the route to the kitchen, entry, closets, bathroom, windows, radiators, PTAC units, or door swings.",
+    "For kitchens, do not change cabinets, counters, appliances, backsplash, plumbing, doors, windows, or layout. Add only removable styling such as herbs, cutting boards, soap, small utensil accessories, countertop objects, and a runner rug.",
+    "Avoid adding hardwired pendant lights, new sconces, or fixture changes unless they already exist in the original photo or the customer explicitly allows fixture replacement.",
+    "For bathrooms, do not change tile, tub, shower, toilet, vanity, mirror, plumbing, hardware, fixtures, or layout. Add removable spa styling only: folded towels, tub tray, candle, brush, soap dispenser, toothbrush cup, and small plants.",
+    "Preserve the original camera perspective, ceiling beams or soffits, wall geometry, closets, smoke detectors, vents, outlets, baseboards, floor registers, radiators, PTAC units, trim, and existing lighting.",
+    "Never invent new doors, windows, closets, built-ins, partitions, shelves attached to the wall, extra floor area, or architectural recesses.",
+    "Furniture and accessories must never cover windows, block natural light, sit in front of radiators or PTAC units, obstruct doors, hide vents, or make maintenance access implausible.",
+    "Use warm professional listing photography: bright whites stay clean, wood tones stay rich, shadows are soft, accessories are edited down, no clutter, no text, no labels, and no unrealistic scale.",
+    "Prefer tenant-plausible pieces over renovation changes. Everything added should read as furniture, art, rug, lamp, plant, textile, or freestanding accessory unless the customer requests otherwise.",
+    "If a room is not suitable for furniture, style it lightly with removable accessories or leave fixed surfaces untouched instead of forcing furniture into the image.",
+    "Minimize customer prompting by making a complete tasteful default plan first, then ask only if a true business constraint is missing."
+  ],
+  "room_guidance": {
+    "bedroom": {
+      "preferred_style": "Warm gallery bedroom with cream upholstered bed, walnut accents, quiet art, soft greenery, and generous walkways.",
+      "avoid": "Oversized beds, blocked closets, blocked windows, fake built-ins, heavy drapery, cluttered side tables, or inconsistent rustic styling."
+    },
+    "living_dining": {
+      "preferred_style": "Open, premium lounge-dining arrangement with beige seating, walnut case goods, cream rug, compact round dining setup, and restrained art.",
+      "avoid": "Furniture that blocks circulation, giant sectionals that shrink the room, mismatched dining style, or wall changes."
+    },
+    "kitchen": {
+      "preferred_style": "Light styling with removable countertop accessories, herbs, cutting boards, soap, and runner rug while keeping the kitchen architecture unchanged.",
+      "avoid": "Changed cabinetry, changed counters, new backsplash, hardwired pendant lights, appliance changes, or added islands."
+    },
+    "bathroom": {
+      "preferred_style": "Spa-like removable accessories only, with towels, tray, candle, soap, small plant, and clean surfaces.",
+      "avoid": "Changed tile, changed plumbing, changed mirror, changed fixtures, new storage, or altered tub and vanity geometry."
+    }
+  }
+}

@@ -10,6 +10,7 @@ A Railway-ready chat app for staging empty NYC apartment photos with multiple Op
 - Edits each image with consistent furniture, art, lighting, and accessories while preserving fixed architecture.
 - Accepts customer feedback turns and re-edits the set.
 - Stores reusable feedback as durable memory so future sessions avoid repeated mistakes.
+- Loads a checked-in Unit #1 before/after exemplar memory so every new job starts with the same baseline taste profile and fixed-layout constraints.
 
 The app follows OpenAI's current guidance for image workflows: the Responses API supports image inputs and multi-turn image generation/editing with the `image_generation` tool. The default configuration uses `gpt-5.5-pro` with `reasoning.effort=xhigh` and background-mode polling for deep, long-running staging work. The Responses image-generation tool uses OpenAI's GPT Image model selection internally, while the Image API exposes `gpt-image-2` for direct single-image generation/editing workflows.
 
@@ -24,6 +25,12 @@ npm run dev
 Set `OPENAI_API_KEY` in `.env` to enable real planning and image generation. Without a key, the app runs with a fallback plan and no generated image edits.
 
 Local development uses `data/local-db.json`. On Railway, attach Postgres and set `DATABASE_URL` for durable storage.
+
+## Training Memory
+
+The app is not fine-tuning a model. It uses a durable exemplar file at `training/unit-1-style-memory.json`, distilled from the local Unit #1 before/after folders in Downloads. The file stores reusable staging lessons, room rules, and architectural constraints while keeping the private listing photos out of GitHub.
+
+Set `TRAINING_MEMORY_PATH` only if you want to load a different JSON exemplar file. The active exemplar is exposed at `/api/training`, and `/api/health` returns the loaded lesson count.
 
 ## Railway Deploy
 
@@ -44,6 +51,7 @@ OPENAI_BACKGROUND_MODE=true
 OPENAI_POLL_INTERVAL_MS=2500
 OPENAI_RESPONSE_TIMEOUT_MS=720000
 DATABASE_URL=${{Postgres.DATABASE_URL}}
+TRAINING_MEMORY_PATH=
 ```
 
 Deploy with the Railway dashboard or CLI:
