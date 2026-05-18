@@ -7,7 +7,7 @@ A Railway-ready chat app for staging empty NYC apartment photos with multiple Op
 - Upload multiple empty apartment photos.
 - Runs several specialist planning agents over the same apartment set.
 - Synthesizes one coherent apartment-wide staging theme.
-- Edits each image with consistent furniture, art, lighting, and accessories while preserving fixed architecture.
+- Edits each image with consistent movable furniture, pictures, rugs, lamps, plants, and cosmetic accessories while preserving the original layout exactly.
 - Accepts customer feedback turns and re-edits the set.
 - Shows a live progress timeline for planning, image generation, retries, completion, and failures.
 - Stores reusable feedback as durable memory so future sessions avoid repeated mistakes.
@@ -63,12 +63,14 @@ OPENAI_IMAGE_EDIT_MODEL=gpt-image-1.5
 OPENAI_REASONING_EFFORT=xhigh
 OPENAI_BACKGROUND_MODE=true
 OPENAI_POLL_INTERVAL_MS=2500
-OPENAI_RESPONSE_TIMEOUT_MS=720000
-OPENAI_HTTP_TIMEOUT_MS=60000
-OPENAI_AGENT_TIMEOUT_MS=30000
-OPENAI_SYNTHESIS_TIMEOUT_MS=30000
-OPENAI_EDIT_TIMEOUT_MS=300000
+OPENAI_RESPONSE_TIMEOUT_MS=1200000
+OPENAI_HTTP_TIMEOUT_MS=180000
+OPENAI_AGENT_TIMEOUT_MS=600000
+OPENAI_SYNTHESIS_TIMEOUT_MS=600000
+OPENAI_EDIT_TIMEOUT_MS=600000
 OPENAI_AGENT_IMAGE_INPUTS=false
+OPENAI_IMAGE_INPUT_FIDELITY=high
+STRICT_LAYOUT_LOCK=true
 OPENAI_DEFAULT_MAX_OUTPUT_TOKENS=8000
 OPENAI_RETRY_MAX_OUTPUT_TOKENS=16000
 OPENAI_EDIT_CONCURRENCY=2

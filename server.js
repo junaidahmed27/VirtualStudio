@@ -19,14 +19,16 @@ const IMAGE_EDIT_MODEL = process.env.OPENAI_IMAGE_EDIT_MODEL || "gpt-image-1.5";
 const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT || "xhigh";
 const OPENAI_BACKGROUND_MODE = (process.env.OPENAI_BACKGROUND_MODE || "true").toLowerCase() !== "false";
 const OPENAI_POLL_INTERVAL_MS = Number(process.env.OPENAI_POLL_INTERVAL_MS || 2500);
-const OPENAI_RESPONSE_TIMEOUT_MS = Number(process.env.OPENAI_RESPONSE_TIMEOUT_MS || 12 * 60 * 1000);
-const OPENAI_HTTP_TIMEOUT_MS = Number(process.env.OPENAI_HTTP_TIMEOUT_MS || 60 * 1000);
-const OPENAI_AGENT_TIMEOUT_MS = Number(process.env.OPENAI_AGENT_TIMEOUT_MS || 30 * 1000);
-const OPENAI_SYNTHESIS_TIMEOUT_MS = Number(process.env.OPENAI_SYNTHESIS_TIMEOUT_MS || 30 * 1000);
-const OPENAI_EDIT_TIMEOUT_MS = Number(process.env.OPENAI_EDIT_TIMEOUT_MS || 5 * 60 * 1000);
+const OPENAI_RESPONSE_TIMEOUT_MS = Number(process.env.OPENAI_RESPONSE_TIMEOUT_MS || 20 * 60 * 1000);
+const OPENAI_HTTP_TIMEOUT_MS = Number(process.env.OPENAI_HTTP_TIMEOUT_MS || 3 * 60 * 1000);
+const OPENAI_AGENT_TIMEOUT_MS = Number(process.env.OPENAI_AGENT_TIMEOUT_MS || 10 * 60 * 1000);
+const OPENAI_SYNTHESIS_TIMEOUT_MS = Number(process.env.OPENAI_SYNTHESIS_TIMEOUT_MS || 10 * 60 * 1000);
+const OPENAI_EDIT_TIMEOUT_MS = Number(process.env.OPENAI_EDIT_TIMEOUT_MS || 10 * 60 * 1000);
 const OPENAI_DEFAULT_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_DEFAULT_MAX_OUTPUT_TOKENS || 8000);
 const OPENAI_RETRY_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_RETRY_MAX_OUTPUT_TOKENS || 16000);
 const OPENAI_AGENT_IMAGE_INPUTS = (process.env.OPENAI_AGENT_IMAGE_INPUTS || "false").toLowerCase() === "true";
+const OPENAI_IMAGE_INPUT_FIDELITY = process.env.OPENAI_IMAGE_INPUT_FIDELITY || "high";
+const STRICT_LAYOUT_LOCK = (process.env.STRICT_LAYOUT_LOCK || "true").toLowerCase() !== "false";
 const MAX_IMAGE_COUNT = Number(process.env.MAX_IMAGE_COUNT || 8);
 const MAX_JSON_BODY_BYTES = Number(process.env.MAX_JSON_BODY_BYTES || 32 * 1024 * 1024);
 const AUTO_LEARN_FROM_USAGE = (process.env.AUTO_LEARN_FROM_USAGE || "true").toLowerCase() !== "false";
@@ -829,8 +831,10 @@ function agentPrompt(role, brief, memories, usageExamples, feedback) {
   return [
     `You are the ${role} for a premium NYC apartment virtual staging workflow.`,
     "You are reviewing empty apartment photos that must be staged for rental or sale.",
-    "Hard constraints: preserve all physical layout, walls, floors, windows, doors, closets, radiators, outlets, plumbing, ceiling, trim, and room proportions. Never create, remove, resize, or move architectural features.",
-    "Furniture and accessories may be added, removed, or changed. Furniture must not block doors, windows, radiators, through-paths, or natural light.",
+    "Hard constraints: preserve the exact original physical layout, camera perspective, framing, crop, walls, floors, windows, doors, closets, radiators, outlets, plumbing, ceiling, trim, fixed fixtures, appliances, and room proportions. Never create, remove, resize, repaint, refloor, move, or redraw architectural features or fixed surfaces.",
+    "Only tenant-removable furniture and cosmetic items may be added: freestanding furniture, rugs, pillows, throws, plants, table lamps or floor lamps, framed pictures/art on existing wall areas, mirrors, books, trays, towels, soap, vases, and small decor.",
+    "Furniture and accessories must not block doors, windows, radiators, through-paths, appliances, outlets, closets, or natural light.",
+    "If a desired staging move would require changing the original room layout, leave that area empty and choose a smaller movable item.",
     "The whole apartment must have one coherent theme, palette, material system, and level of luxury across every photo.",
     "Minimize customer prompting by making tasteful defaults and calling out only truly necessary questions.",
     `Customer brief: ${brief || "Stage this apartment to look stunning, spacious, and high-end."}`,
@@ -888,18 +892,19 @@ function fallbackPlan(session, feedback = "") {
       materials: ["tailored linen", "walnut wood", "brushed brass", "low-pile wool"]
     },
     global_guardrails: [
-      "Preserve every architectural feature and fixed layout element.",
+      "Preserve the exact original image layout, perspective, crop, room proportions, architecture, and all fixed surfaces.",
       "Keep doors, windows, radiators, and walking paths clear.",
       "Use one coherent furniture style across all rooms.",
-      "Favor low-profile furniture where it improves perceived space."
+      "Only add movable furniture and cosmetic decor; do not remodel, repaint, refloor, relight, or redraw the room.",
+      "Favor low-profile furniture where it improves perceived space without changing the room."
     ],
     per_photo: session.photos.map((photo, index) => ({
       photo_id: photo.id,
       room_label: photo.room_label || `Room ${index + 1}`,
-      staging_goal: "Make the room look spacious, premium, bright, and immediately livable.",
-      furniture: ["low-profile sofa or bed as appropriate", "slim side tables", "large neutral rug", "one statement art piece", "warm task lighting"],
-      placement_rules: ["do not block doors or windows", "maintain clear circulation", "keep furniture scale proportional"],
-      edit_prompt: "Add premium modern furniture, cohesive warm neutral styling, tasteful art, layered lighting, and minimal accessories while preserving the original architecture."
+      staging_goal: "Make the original room feel premium and immediately livable using movable staging only.",
+      furniture: ["low-profile sofa or bed as appropriate", "slim side tables", "large neutral rug", "one framed art piece or picture on an existing wall", "freestanding table or floor lamp", "small plants and decor"],
+      placement_rules: ["do not block doors or windows", "maintain clear circulation", "keep furniture scale proportional", "do not change any fixed room surface or layout"],
+      edit_prompt: "Add premium modern freestanding furniture, removable rugs, framed pictures/art, plants, table lamps or floor lamps, and minimal cosmetic accessories. Do not alter the original room layout, walls, floors, doors, windows, fixed fixtures, perspective, crop, or architecture."
     })),
     customer_reply: feedback
       ? "I incorporated the feedback and kept the apartment-wide theme consistent."
@@ -929,7 +934,7 @@ async function synthesizePlan(session, agentOutputs, memories, usageExamples, fe
   "customer_reply": "",
   "quality_bar": []
 }`,
-    "Rules: no architectural changes; one coherent theme; do not block doors/windows/radiators; minimize customer questions; optimize for stunning, lavish, spacious real estate photos.",
+    "Rules: no changes to the original image layout, camera perspective, crop, walls, floors, windows, doors, fixed fixtures, appliances, closets, radiators, or architecture; one coherent theme; only add movable furniture and cosmetic decor such as pictures/art, rugs, lamps, plants, towels, books, trays, and small accessories; do not block doors/windows/radiators; minimize customer questions; optimize for premium real estate photos through styling, not remodeling.",
     `Photos: ${session.photos.map((photo, index) => `${index + 1}. ${photo.name} (${photo.id})`).join("; ")}`,
     `Durable lessons:\n${memoryText(memories, usageExamples)}`,
     feedback ? `Customer feedback:\n${feedback}` : "",
@@ -967,7 +972,8 @@ async function generatePlan(session, feedback) {
   await recordProgress(session.id, "Design agents are building a cohesive apartment-wide staging plan.", {
     stage: "planning",
     photos: session.photos.length,
-    roles: roles.length
+    roles: roles.length,
+    timeout_ms: OPENAI_AGENT_TIMEOUT_MS
   });
   const agentOutputs = await Promise.all(roles.map((role) => runAgent(role, session, memories, usageExamples, feedback)));
   const plan = await synthesizePlan(session, agentOutputs, memories, usageExamples, feedback);
@@ -984,36 +990,63 @@ function photoPlan(plan, photo, index) {
 }
 
 function editPrompt(plan, item, feedback) {
+  const layoutLock = [
+    "STRICT LAYOUT LOCK - THIS IS NON-NEGOTIABLE:",
+    "Use the uploaded photo as a locked background plate. Preserve the exact original room, camera position, lens perspective, framing, crop, wall geometry, ceiling line, floor shape, window and door locations, closets, trim, baseboards, radiators, vents, outlets, switches, appliances, counters, plumbing, tile, shadows on fixed surfaces, and room proportions.",
+    "Do not widen, shrink, straighten, stretch, rotate, crop, repaint, refloor, remodel, relight, clean up, replace, remove, move, or redraw any fixed part of the room.",
+    "Do not add or remove doors, windows, closets, walls, built-ins, shelves, outlets, radiators, appliances, counters, backsplash, fixtures, or architectural recesses.",
+    "Only add tenant-removable staging: freestanding furniture, rugs, pillows, throws, plants, table lamps or floor lamps, framed pictures/art on existing wall areas, mirrors, books, trays, towels, soap, vases, and small decor.",
+    "Furniture and decor may occlude the pixels directly behind them, but everything visible around those objects must match the original photo exactly.",
+    "If a furniture placement would require changing the room layout or hiding a door, window, radiator, appliance, outlet, closet, or walkway, leave that area empty instead.",
+    "The result must look like the original listing photo with movable staging items added, not a redesigned or regenerated room."
+  ];
   return [
     "Virtually stage this NYC apartment photo for a premium rental or sale listing.",
-    "Make it photorealistic, stunning, spacious, polished, and expensive without looking fake.",
+    "Make it photorealistic, polished, high-end, and tenant-plausible using movable staging items only.",
+    STRICT_LAYOUT_LOCK ? layoutLock.join("\n") : "",
     `Apartment-wide theme: ${plan.theme?.name || "premium cohesive modern staging"}.`,
-    `Palette: ${(plan.theme?.palette || []).join(", ") || "warm neutrals, charcoal, walnut, brass, restrained accent color"}.`,
-    `Materials: ${(plan.theme?.materials || []).join(", ") || "tailored textiles, warm wood, refined metal, layered lighting"}.`,
+    `Palette for added furniture/decor only: ${(plan.theme?.palette || []).join(", ") || "warm neutrals, charcoal, walnut, brass, restrained accent color"}.`,
+    `Materials for added furniture/decor only: ${(plan.theme?.materials || []).join(", ") || "tailored textiles, warm wood, refined metal, linen, wool"}.`,
     `Room goal: ${item.staging_goal || ""}`,
-    `Furniture and accessories: ${(item.furniture || []).join(", ")}`,
+    `Allowed additions: ${(item.furniture || []).join(", ")}`,
     `Placement rules: ${(item.placement_rules || []).join("; ")}`,
     `Specific staging prompt: ${item.edit_prompt || ""}`,
     feedback ? `Customer feedback to apply now: ${feedback}` : "",
-    "Non-negotiable constraints: preserve all walls, floors, windows, doors, closets, radiators, outlets, ceiling, trim, and room proportions exactly. Do not add, remove, resize, move, or cover fixed architecture. Do not block any door, window, radiator, or natural walkway. No labels, captions, watermarks, or impossible furniture placement."
+    "Final acceptance test: comparing before and after, the only differences should be added movable furniture and cosmetic decor. Any changed layout, architecture, room shape, surface material, fixed fixture, camera perspective, or crop is a failed output. No labels, captions, watermarks, or impossible furniture placement."
   ].filter(Boolean).join("\n\n");
 }
 
 async function generatePhotoEdit(photo, plan, item, feedback) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
-  const sourceImage = imageDataUrlToFile(photo.latest_data_url || photo.original_data_url, photo.mime);
-  const form = new FormData();
-  form.append("model", IMAGE_EDIT_MODEL);
-  form.append("image", sourceImage.blob, sourceImage.filename);
-  form.append("prompt", editPrompt(plan, item, feedback));
-  form.append("quality", "high");
-  form.append("size", "auto");
-  form.append("output_format", "jpeg");
+  const sourceImage = imageDataUrlToFile(photo.original_data_url, photo.mime);
+  const prompt = editPrompt(plan, item, feedback);
 
-  const response = await openaiFetch("/v1/images/edits", {
-    method: "POST",
-    body: form
-  }, OPENAI_EDIT_TIMEOUT_MS);
+  async function requestEdit(includeInputFidelity = true) {
+    const form = new FormData();
+    form.append("model", IMAGE_EDIT_MODEL);
+    form.append("image", sourceImage.blob, sourceImage.filename);
+    form.append("prompt", prompt);
+    form.append("quality", "high");
+    form.append("size", "auto");
+    form.append("output_format", "jpeg");
+    if (includeInputFidelity && OPENAI_IMAGE_INPUT_FIDELITY) {
+      form.append("input_fidelity", OPENAI_IMAGE_INPUT_FIDELITY);
+    }
+    return openaiFetch("/v1/images/edits", {
+      method: "POST",
+      body: form
+    }, OPENAI_EDIT_TIMEOUT_MS);
+  }
+
+  let response;
+  try {
+    response = await requestEdit(true);
+  } catch (error) {
+    if (!OPENAI_IMAGE_INPUT_FIDELITY || !/input_fidelity|unknown parameter|unsupported parameter/i.test(error.message)) {
+      throw error;
+    }
+    response = await requestEdit(false);
+  }
   const b64 = extractGeneratedImage(response);
   if (!b64) {
     throw new Error("OpenAI image generation completed without returning an edited image");
