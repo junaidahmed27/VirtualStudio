@@ -1158,23 +1158,36 @@ async function processSession(sessionId, feedback = "") {
   if (jobs.has(sessionId)) return;
   jobs.add(sessionId);
   try {
+    let session = await store.getSession(sessionId);
+    const existingPlan = session?.plan && Object.keys(session.plan).length ? session.plan : null;
+    const resumeEditing = !feedback && session?.status === "editing" && existingPlan;
     await recordProgress(sessionId, feedback
       ? "Received your feedback. Restarting the staging workflow."
-      : "Received the photos and brief. Starting the staging workflow.", {
+      : resumeEditing
+        ? "Resuming image generation from the existing design plan."
+        : "Received the photos and brief. Starting the staging workflow.", {
         stage: "queued",
-        feedback: Boolean(feedback)
+        feedback: Boolean(feedback),
+        resume_editing: Boolean(resumeEditing)
       });
-    await store.updateSession(sessionId, { status: "planning" });
-    let session = await store.getSession(sessionId);
-    const plan = await generatePlan(session, feedback);
-    await store.updateSession(sessionId, { status: "editing", plan });
+
+    let plan = existingPlan;
+    if (!resumeEditing) {
+      await store.updateSession(sessionId, { status: "planning" });
+      session = await store.getSession(sessionId);
+      plan = await generatePlan(session, feedback);
+      await store.updateSession(sessionId, { status: "editing", plan });
+      await store.addTurn(sessionId, "assistant", plan.customer_reply || plan.summary || "I created the staging plan.", {
+        kind: feedback ? "feedback_plan" : "initial_plan",
+        plan
+      });
+    } else {
+      await store.updateSession(sessionId, { status: "editing" });
+    }
+
     await recordProgress(sessionId, "The app is now producing staged pictures.", {
       stage: "editing",
       photos: session.photos.length
-    });
-    await store.addTurn(sessionId, "assistant", plan.customer_reply || plan.summary || "I created the staging plan.", {
-      kind: feedback ? "feedback_plan" : "initial_plan",
-      plan
     });
     session = await store.getSession(sessionId);
     const editResults = await generateEdits(session, plan, feedback);
