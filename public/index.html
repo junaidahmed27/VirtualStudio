@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VirtualStage NYC</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-row">
+          <div class="mark">VS</div>
+          <div>
+            <h1>VirtualStage NYC</h1>
+            <p id="health">Checking setup...</p>
+          </div>
+        </div>
+
+        <section class="panel upload-panel">
+          <div class="panel-header">
+            <h2>Photos</h2>
+            <button id="choosePhotos" class="icon-button" type="button" aria-label="Choose apartment photos" title="Choose apartment photos">+</button>
+          </div>
+          <input id="fileInput" type="file" accept="image/*" multiple hidden>
+          <div id="dropzone" class="dropzone">
+            <div class="drop-visual">
+              <div></div><div></div><div></div>
+            </div>
+            <strong>Drop empty apartment photos</strong>
+            <span>JPG, PNG, or HEIC converted by browser support</span>
+          </div>
+          <div id="uploadPreview" class="upload-preview"></div>
+        </section>
+
+        <section class="panel memory-panel">
+          <div class="panel-header">
+            <h2>Memory</h2>
+            <button id="refreshMemory" class="icon-button" type="button" aria-label="Refresh memory" title="Refresh memory">↻</button>
+          </div>
+          <div id="memoryList" class="memory-list"></div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <h2>Staging Session</h2>
+            <p id="sessionSummary">Upload photos and send the first brief.</p>
+          </div>
+          <div id="statusPill" class="status-pill">Idle</div>
+        </header>
+
+        <section class="gallery-band">
+          <div id="gallery" class="gallery empty-gallery">
+            <div class="empty-state">
+              <div class="room-frame">
+                <span></span><span></span><span></span>
+              </div>
+              <h3>No staged images yet</h3>
+            </div>
+          </div>
+        </section>
+
+        <section class="chat-band">
+          <div id="messages" class="messages"></div>
+          <form id="chatForm" class="composer">
+            <textarea id="messageInput" rows="3" placeholder="Stage this empty apartment to feel lavish, bright, spacious, and cohesive across every room."></textarea>
+            <button id="sendButton" type="submit">Send</button>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
