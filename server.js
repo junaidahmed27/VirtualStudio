@@ -20,6 +20,7 @@ const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT || "xhigh";
 const OPENAI_BACKGROUND_MODE = (process.env.OPENAI_BACKGROUND_MODE || "true").toLowerCase() !== "false";
 const OPENAI_POLL_INTERVAL_MS = Number(process.env.OPENAI_POLL_INTERVAL_MS || 2500);
 const OPENAI_RESPONSE_TIMEOUT_MS = Number(process.env.OPENAI_RESPONSE_TIMEOUT_MS || 12 * 60 * 1000);
+const OPENAI_HTTP_TIMEOUT_MS = Number(process.env.OPENAI_HTTP_TIMEOUT_MS || 60 * 1000);
 const OPENAI_AGENT_TIMEOUT_MS = Number(process.env.OPENAI_AGENT_TIMEOUT_MS || 90 * 1000);
 const OPENAI_SYNTHESIS_TIMEOUT_MS = Number(process.env.OPENAI_SYNTHESIS_TIMEOUT_MS || 90 * 1000);
 const OPENAI_EDIT_TIMEOUT_MS = Number(process.env.OPENAI_EDIT_TIMEOUT_MS || 5 * 60 * 1000);
@@ -609,22 +610,35 @@ async function openaiResponses(payload, options = {}) {
   const response = await openaiFetch("/v1/responses", {
     method: "POST",
     body: JSON.stringify(payload)
-  });
+  }, options.requestTimeoutMs || OPENAI_HTTP_TIMEOUT_MS);
   if (payload.background && response.id) {
     return pollOpenAIResponse(response, options.responseTimeoutMs || OPENAI_RESPONSE_TIMEOUT_MS);
   }
   return response;
 }
 
-async function openaiFetch(pathname, init = {}) {
-  const response = await fetch(`https://api.openai.com${pathname}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${OPENAI_API_KEY}`,
-      "content-type": "application/json",
-      ...(init.headers || {})
+async function openaiFetch(pathname, init = {}, timeoutMs = OPENAI_HTTP_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`https://api.openai.com${pathname}`, {
+      ...init,
+      signal: init.signal || controller.signal,
+      headers: {
+        authorization: `Bearer ${OPENAI_API_KEY}`,
+        "content-type": "application/json",
+        ...(init.headers || {})
+      }
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(`OpenAI request to ${pathname} timed out after ${timeoutMs}ms`);
     }
-  });
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`OpenAI request failed (${response.status}): ${text}`);
