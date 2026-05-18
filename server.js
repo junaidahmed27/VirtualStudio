@@ -22,6 +22,10 @@ const OPENAI_POLL_INTERVAL_MS = Number(process.env.OPENAI_POLL_INTERVAL_MS || 25
 const OPENAI_RESPONSE_TIMEOUT_MS = Number(process.env.OPENAI_RESPONSE_TIMEOUT_MS || 12 * 60 * 1000);
 const MAX_IMAGE_COUNT = Number(process.env.MAX_IMAGE_COUNT || 8);
 const MAX_JSON_BODY_BYTES = Number(process.env.MAX_JSON_BODY_BYTES || 32 * 1024 * 1024);
+const AUTO_LEARN_FROM_USAGE = (process.env.AUTO_LEARN_FROM_USAGE || "true").toLowerCase() !== "false";
+const MAX_USAGE_EXAMPLES_IN_PROMPT = Number(process.env.MAX_USAGE_EXAMPLES_IN_PROMPT || 8);
+const MAX_USAGE_LESSONS_IN_PROMPT = Number(process.env.MAX_USAGE_LESSONS_IN_PROMPT || 24);
+const MAX_USAGE_LESSONS_PER_EXAMPLE = Number(process.env.MAX_USAGE_LESSONS_PER_EXAMPLE || 6);
 
 const jobs = new Set();
 let trainingMemory = {
@@ -131,9 +135,14 @@ class JsonStore {
     try {
       this.db = JSON.parse(await fs.readFile(LOCAL_DB_PATH, "utf8"));
     } catch {
-      this.db = { sessions: [], turns: [], photos: [], memories: [] };
+      this.db = { sessions: [], turns: [], photos: [], memories: [], usage_examples: [] };
       await this.save();
     }
+    if (!Array.isArray(this.db.sessions)) this.db.sessions = [];
+    if (!Array.isArray(this.db.turns)) this.db.turns = [];
+    if (!Array.isArray(this.db.photos)) this.db.photos = [];
+    if (!Array.isArray(this.db.memories)) this.db.memories = [];
+    if (!Array.isArray(this.db.usage_examples)) this.db.usage_examples = [];
   }
 
   async save() {
@@ -210,6 +219,51 @@ class JsonStore {
     return [...this.db.memories].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   }
 
+  async listUsageExamples(limit = 20) {
+    return [...this.db.usage_examples]
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .slice(0, limit);
+  }
+
+  async countUsageExamples() {
+    return this.db.usage_examples.length;
+  }
+
+  async upsertUsageExample(example) {
+    if (!example?.source_session_id || !Array.isArray(example.reusable_lessons) || !example.reusable_lessons.length) {
+      return null;
+    }
+    const turnCount = Number(example.source_turn_count || 0);
+    const existing = this.db.usage_examples.find((row) => (
+      row.source_session_id === example.source_session_id && Number(row.source_turn_count || 0) === turnCount
+    ));
+    const patch = {
+      source_session_id: example.source_session_id,
+      source_turn_count: turnCount,
+      summary: example.summary || "Reusable staging example",
+      customer_brief: example.customer_brief || "",
+      feedback: example.feedback || "",
+      room_labels: example.room_labels || [],
+      theme: example.theme || {},
+      reusable_lessons: example.reusable_lessons,
+      quality_signals: example.quality_signals || [],
+      updated_at: nowIso()
+    };
+    if (existing) {
+      Object.assign(existing, patch);
+      await this.save();
+      return existing;
+    }
+    const row = {
+      id: id("uxe"),
+      ...patch,
+      created_at: nowIso()
+    };
+    this.db.usage_examples.push(row);
+    await this.save();
+    return row;
+  }
+
   async upsertMemory(memory) {
     if (!memory?.durable_instruction) return null;
     const key = memory.durable_instruction.trim().toLowerCase();
@@ -281,6 +335,21 @@ class PgStore {
         times_seen integer not null default 1,
         created_at timestamptz not null default now(),
         updated_at timestamptz not null default now()
+      );
+      create table if not exists usage_examples (
+        id text primary key,
+        source_session_id text not null,
+        source_turn_count integer not null,
+        summary text not null,
+        customer_brief text not null default '',
+        feedback text not null default '',
+        room_labels jsonb not null default '[]'::jsonb,
+        theme jsonb not null default '{}'::jsonb,
+        reusable_lessons jsonb not null default '[]'::jsonb,
+        quality_signals jsonb not null default '[]'::jsonb,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (source_session_id, source_turn_count)
       );
     `);
   }
@@ -363,6 +432,54 @@ class PgStore {
   async listMemories() {
     const result = await this.pool.query("select * from memories order by updated_at desc");
     return result.rows;
+  }
+
+  async listUsageExamples(limit = 20) {
+    const result = await this.pool.query(
+      "select * from usage_examples order by updated_at desc limit $1",
+      [limit]
+    );
+    return result.rows;
+  }
+
+  async countUsageExamples() {
+    const result = await this.pool.query("select count(*)::int as count from usage_examples");
+    return result.rows[0]?.count || 0;
+  }
+
+  async upsertUsageExample(example) {
+    if (!example?.source_session_id || !Array.isArray(example.reusable_lessons) || !example.reusable_lessons.length) {
+      return null;
+    }
+    const result = await this.pool.query(
+      `insert into usage_examples
+       (id, source_session_id, source_turn_count, summary, customer_brief, feedback, room_labels, theme, reusable_lessons, quality_signals)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       on conflict (source_session_id, source_turn_count)
+       do update set
+         summary = excluded.summary,
+         customer_brief = excluded.customer_brief,
+         feedback = excluded.feedback,
+         room_labels = excluded.room_labels,
+         theme = excluded.theme,
+         reusable_lessons = excluded.reusable_lessons,
+         quality_signals = excluded.quality_signals,
+         updated_at = now()
+       returning *`,
+      [
+        id("uxe"),
+        example.source_session_id,
+        Number(example.source_turn_count || 0),
+        example.summary || "Reusable staging example",
+        example.customer_brief || "",
+        example.feedback || "",
+        example.room_labels || [],
+        example.theme || {},
+        example.reusable_lessons,
+        example.quality_signals || []
+      ]
+    );
+    return result.rows[0];
   }
 
   async upsertMemory(memory) {
@@ -501,7 +618,32 @@ function imageInputs(photos) {
   return content;
 }
 
-function memoryText(memories) {
+function cleanString(value, maxLength = 1000) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function cleanStringList(value, maxItems = 8, maxLength = 500) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => cleanString(item, maxLength))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function usageExamplesText(usageExamples) {
+  if (!usageExamples.length) return "No completed usage examples have been distilled yet.";
+  const lines = [];
+  for (const example of usageExamples.slice(0, MAX_USAGE_EXAMPLES_IN_PROMPT)) {
+    const lessons = cleanStringList(example.reusable_lessons, MAX_USAGE_LESSONS_PER_EXAMPLE, 450);
+    if (!lessons.length) continue;
+    lines.push(`Example: ${cleanString(example.summary, 260) || "Reusable staging example"}`);
+    lessons.forEach((lesson, index) => lines.push(`- Lesson ${index + 1}: ${lesson}`));
+    if (lines.filter((line) => line.startsWith("- Lesson")).length >= MAX_USAGE_LESSONS_IN_PROMPT) break;
+  }
+  return lines.length ? lines.join("\n") : "No completed usage examples have reusable lessons yet.";
+}
+
+function memoryText(memories, usageExamples = []) {
   const staticLessons = trainingMemory.durable_lessons || [];
   const staticText = staticLessons.length
     ? staticLessons.slice(0, 40).map((lesson, index) => `${index + 1}. ${lesson}`).join("\n")
@@ -513,12 +655,13 @@ function memoryText(memories) {
       .join("\n")
     : "No durable customer corrections have been learned yet.";
   return [
-    `Static Unit #1 before-after exemplar lessons:\n${staticText}`,
+    `Static before-after exemplar lessons:\n${staticText}`,
+    `Distilled lessons from completed app usage:\n${usageExamplesText(usageExamples)}`,
     `Durable customer correction memory:\n${learnedText}`
   ].join("\n\n");
 }
 
-function agentPrompt(role, brief, memories, feedback) {
+function agentPrompt(role, brief, memories, usageExamples, feedback) {
   return [
     `You are the ${role} for a premium NYC apartment virtual staging workflow.`,
     "You are reviewing empty apartment photos that must be staged for rental or sale.",
@@ -528,18 +671,18 @@ function agentPrompt(role, brief, memories, feedback) {
     "Minimize customer prompting by making tasteful defaults and calling out only truly necessary questions.",
     `Customer brief: ${brief || "Stage this apartment to look stunning, spacious, and high-end."}`,
     feedback ? `Customer feedback to incorporate: ${feedback}` : "",
-    `Durable lessons from prior customers:\n${memoryText(memories)}`,
+    `Durable lessons from prior customers and usage:\n${memoryText(memories, usageExamples)}`,
     "Return concise JSON with keys: observations, constraints, theme_recommendation, per_photo_recommendations, risks, edit_prompt_addendum."
   ].filter(Boolean).join("\n\n");
 }
 
-async function runAgent(role, session, memories, feedback) {
+async function runAgent(role, session, memories, usageExamples, feedback) {
   const response = await safeResponses(responsePayload({
     model: TEXT_MODEL,
     input: [{
       role: "user",
       content: [
-        { type: "input_text", text: agentPrompt(role, session.turns.at(-1)?.content || "", memories, feedback) },
+        { type: "input_text", text: agentPrompt(role, session.turns.at(-1)?.content || "", memories, usageExamples, feedback) },
         ...imageInputs(session.photos)
       ]
     }]
@@ -578,7 +721,7 @@ function fallbackPlan(session, feedback = "") {
   };
 }
 
-async function synthesizePlan(session, agentOutputs, memories, feedback) {
+async function synthesizePlan(session, agentOutputs, memories, usageExamples, feedback) {
   const prompt = [
     "You are the final design director. Synthesize these specialist agent notes into one apartment-wide virtual staging plan.",
     "Return JSON only. Match this shape:",
@@ -594,7 +737,7 @@ async function synthesizePlan(session, agentOutputs, memories, feedback) {
 }`,
     "Rules: no architectural changes; one coherent theme; do not block doors/windows/radiators; minimize customer questions; optimize for stunning, lavish, spacious real estate photos.",
     `Photos: ${session.photos.map((photo, index) => `${index + 1}. ${photo.name} (${photo.id})`).join("; ")}`,
-    `Durable lessons:\n${memoryText(memories)}`,
+    `Durable lessons:\n${memoryText(memories, usageExamples)}`,
     feedback ? `Customer feedback:\n${feedback}` : "",
     `Agent notes:\n${agentOutputs.map((item) => `## ${item.role}\n${item.text}`).join("\n\n")}`
   ].filter(Boolean).join("\n\n");
@@ -609,15 +752,18 @@ async function synthesizePlan(session, agentOutputs, memories, feedback) {
 
 async function generatePlan(session, feedback) {
   if (!OPENAI_API_KEY) return fallbackPlan(session, feedback);
-  const memories = await store.listMemories();
+  const [memories, usageExamples] = await Promise.all([
+    store.listMemories(),
+    store.listUsageExamples(MAX_USAGE_EXAMPLES_IN_PROMPT)
+  ]);
   const roles = [
     "spatial planner focused on clear circulation and fixed constraints",
     "luxury interior designer focused on theme, materials, and apartment-wide cohesion",
     "NYC leasing photographer focused on buyer impact, light, spaciousness, and listing appeal",
     "practical staging critic focused on realism, furniture scale, blocked windows, blocked doors, and avoidable customer complaints"
   ];
-  const agentOutputs = await Promise.all(roles.map((role) => runAgent(role, session, memories, feedback)));
-  return synthesizePlan(session, agentOutputs, memories, feedback);
+  const agentOutputs = await Promise.all(roles.map((role) => runAgent(role, session, memories, usageExamples, feedback)));
+  return synthesizePlan(session, agentOutputs, memories, usageExamples, feedback);
 }
 
 function photoPlan(plan, photo, index) {
@@ -722,6 +868,90 @@ async function deriveDurableMemory(sessionId, feedback) {
   });
 }
 
+function sessionTrainingDigest(session, feedback) {
+  const plan = session.plan || {};
+  const initialBrief = session.turns.find((turn) => turn.role === "user")?.content || "";
+  return {
+    customer_brief: cleanString(initialBrief, 1200),
+    feedback: cleanString(feedback, 1200),
+    plan: {
+      summary: cleanString(plan.summary, 1000),
+      theme: plan.theme || {},
+      global_guardrails: cleanStringList(plan.global_guardrails, 12, 400),
+      per_photo: (plan.per_photo || []).map((item) => ({
+        room_label: cleanString(item.room_label, 120),
+        staging_goal: cleanString(item.staging_goal, 300),
+        furniture: cleanStringList(item.furniture, 12, 160),
+        placement_rules: cleanStringList(item.placement_rules, 12, 240)
+      })).slice(0, MAX_IMAGE_COUNT)
+    },
+    photos: session.photos.map((photo, index) => ({
+      photo_number: index + 1,
+      room_label: cleanString(photo.room_label || `Room ${index + 1}`, 120),
+      edit_count: Array.isArray(photo.edit_history) ? photo.edit_history.length : 0,
+      generated: Boolean(photo.latest_data_url)
+    }))
+  };
+}
+
+async function deriveUsageTrainingExample(sessionId, feedback = "", { force = false } = {}) {
+  if (!force && !AUTO_LEARN_FROM_USAGE) return null;
+  if (!OPENAI_API_KEY) return null;
+  const session = await store.getSession(sessionId);
+  if (!session?.plan || !Array.isArray(session.photos) || !session.photos.length) return null;
+  const hasGeneratedEdit = session.photos.some((photo) => Boolean(photo.latest_data_url));
+  if (!hasGeneratedEdit) return null;
+
+  const digest = sessionTrainingDigest(session, feedback);
+  const prompt = [
+    "Distill this completed virtual-staging app usage into reusable training memory for future apartment staging jobs.",
+    "Store only generalizable lessons about room recognition, layout constraints, furniture placement, theme selection, customer feedback, and avoidable mistakes.",
+    "Do not store private listing photos, image filenames, addresses, personal names, exact customer wording, or one-off taste preferences.",
+    `Return JSON only with keys:
+{
+  "should_store": true,
+  "summary": "short sanitized example summary",
+  "customer_brief_summary": "sanitized brief summary",
+  "feedback_summary": "sanitized feedback summary or empty string",
+  "reusable_lessons": ["up to ${MAX_USAGE_LESSONS_PER_EXAMPLE} durable instructions"],
+  "quality_signals": ["short reasons this example is useful"]
+}`,
+    `Completed usage digest:\n${JSON.stringify(digest)}`
+  ].join("\n\n");
+
+  const response = await safeResponses(responsePayload({
+    model: TEXT_MODEL,
+    input: prompt,
+    maxOutputTokens: 1800
+  }));
+  const parsed = parseJsonish(extractText(response), { should_store: false });
+  const reusableLessons = cleanStringList(parsed.reusable_lessons, MAX_USAGE_LESSONS_PER_EXAMPLE, 700);
+  if (!parsed.should_store || !reusableLessons.length) return null;
+
+  const usageExample = await store.upsertUsageExample({
+    source_session_id: sessionId,
+    source_turn_count: session.turns.length,
+    summary: cleanString(parsed.summary, 500) || "Completed staging session",
+    customer_brief: cleanString(parsed.customer_brief_summary, 700),
+    feedback: cleanString(parsed.feedback_summary, 700),
+    room_labels: cleanStringList(session.photos.map((photo) => photo.room_label), MAX_IMAGE_COUNT, 120),
+    theme: session.plan.theme || {},
+    reusable_lessons: reusableLessons,
+    quality_signals: cleanStringList(parsed.quality_signals, 8, 300)
+  });
+
+  for (const lesson of reusableLessons) {
+    await store.upsertMemory({
+      issue: `Usage example: ${cleanString(parsed.summary, 220) || "Completed staging session"}`,
+      durable_instruction: lesson,
+      source_session_id: sessionId,
+      source_feedback: cleanString(parsed.feedback_summary, 500) || "usage example"
+    });
+  }
+
+  return usageExample;
+}
+
 async function processSession(sessionId, feedback = "") {
   if (jobs.has(sessionId)) return;
   jobs.add(sessionId);
@@ -738,6 +968,9 @@ async function processSession(sessionId, feedback = "") {
     await generateEdits(session, plan, feedback);
     if (feedback) await deriveDurableMemory(sessionId, feedback);
     await store.updateSession(sessionId, { status: "ready" });
+    deriveUsageTrainingExample(sessionId, feedback).catch((error) => {
+      console.error(`Usage learning failed for ${sessionId}: ${error.message}`);
+    });
   } catch (error) {
     await store.addTurn(sessionId, "assistant", `Generation failed: ${error.message}`, {
       kind: "error"
@@ -778,7 +1011,9 @@ async function handleApi(req, res, pathname) {
       storage: process.env.DATABASE_URL ? "postgres" : "json",
       openaiConfigured: Boolean(OPENAI_API_KEY),
       trainingExemplar: trainingMemory.name || "",
-      trainingLessons: (trainingMemory.durable_lessons || []).length
+      trainingLessons: (trainingMemory.durable_lessons || []).length,
+      usageLearningEnabled: AUTO_LEARN_FROM_USAGE,
+      usageExamples: await store.countUsageExamples()
     });
     return;
   }
@@ -790,6 +1025,11 @@ async function handleApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/memories") {
     jsonResponse(res, 200, { memories: await store.listMemories() });
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/usage-examples") {
+    jsonResponse(res, 200, { usage_examples: await store.listUsageExamples(50) });
     return;
   }
 
@@ -819,6 +1059,18 @@ async function handleApi(req, res, pathname) {
     });
     processSession(session.id).catch(console.error);
     jsonResponse(res, 201, { session });
+    return;
+  }
+
+  const learnMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/learn$/);
+  if (learnMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const usageExample = await deriveUsageTrainingExample(learnMatch[1], String(body.feedback || ""), { force: true });
+    if (!usageExample) {
+      jsonResponse(res, 400, { error: "No reusable usage example could be distilled from this session yet." });
+      return;
+    }
+    jsonResponse(res, 201, { usage_example: usageExample });
     return;
   }
 

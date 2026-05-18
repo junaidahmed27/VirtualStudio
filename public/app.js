@@ -185,13 +185,14 @@ function startPolling() {
 }
 
 async function loadMemory() {
-  const [{ memories }, { training }] = await Promise.all([
+  const [{ memories }, { training }, { usage_examples: usageExamples }] = await Promise.all([
     api("/api/memories"),
-    api("/api/training")
+    api("/api/training"),
+    api("/api/usage-examples")
   ]);
   const trainingLessons = training?.durable_lessons || [];
   els.memoryList.innerHTML = "";
-  if (!memories.length && !trainingLessons.length) {
+  if (!memories.length && !trainingLessons.length && !usageExamples.length) {
     const empty = document.createElement("p");
     empty.textContent = "No corrections stored yet.";
     els.memoryList.append(empty);
@@ -216,6 +217,18 @@ async function loadMemory() {
       els.memoryList.append(item);
     }
   }
+  if (usageExamples.length) {
+    const heading = document.createElement("div");
+    heading.className = "memory-heading";
+    heading.textContent = `Learned usage examples (${usageExamples.length})`;
+    els.memoryList.append(heading);
+    for (const example of usageExamples.slice(0, 5)) {
+      const item = document.createElement("div");
+      item.className = "memory-item usage";
+      item.textContent = example.summary;
+      els.memoryList.append(item);
+    }
+  }
   for (const memory of memories.slice(0, 8)) {
     const item = document.createElement("div");
     item.className = "memory-item";
@@ -227,9 +240,10 @@ async function loadMemory() {
 async function loadHealth() {
   const health = await api("/api/health");
   const training = health.trainingLessons ? `, ${health.trainingLessons} training lessons` : "";
+  const usage = Number.isFinite(health.usageExamples) ? `, ${health.usageExamples} learned examples` : "";
   els.health.textContent = health.openaiConfigured
-    ? `OpenAI ready, ${health.storage} storage${training}`
-    : `OpenAI key missing, ${health.storage} storage${training}`;
+    ? `OpenAI ready, ${health.storage} storage${training}${usage}`
+    : `OpenAI key missing, ${health.storage} storage${training}${usage}`;
 }
 
 els.choosePhotos.addEventListener("click", () => els.fileInput.click());

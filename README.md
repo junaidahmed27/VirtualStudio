@@ -11,6 +11,7 @@ A Railway-ready chat app for staging empty NYC apartment photos with multiple Op
 - Accepts customer feedback turns and re-edits the set.
 - Stores reusable feedback as durable memory so future sessions avoid repeated mistakes.
 - Loads checked-in Units #1-#5 before/after exemplar memory so every new job starts with a broader baseline taste profile and fixed-layout constraints.
+- Distills completed usage into reusable server-side training examples, then feeds those lessons back into future planning prompts.
 
 The app follows OpenAI's current guidance for image workflows: the Responses API supports image inputs and multi-turn image generation/editing with the `image_generation` tool. The default configuration uses `gpt-5.5-pro` with `reasoning.effort=xhigh` and background-mode polling for deep, long-running staging work. The Responses image-generation tool uses OpenAI's GPT Image model selection internally, while the Image API exposes `gpt-image-2` for direct single-image generation/editing workflows.
 
@@ -32,6 +33,18 @@ The app is not fine-tuning a model. It uses a durable exemplar file at `training
 
 Set `TRAINING_MEMORY_PATH` only if you want to load a different JSON exemplar file. The active exemplar is exposed at `/api/training`, and `/api/health` returns the loaded lesson count.
 
+## Continual Usage Learning
+
+By default, completed sessions are distilled into compact `usage_examples` records. These records store sanitized summaries, reusable lessons, room labels, theme metadata, and quality signals. They do not store raw photos, generated images, filenames, addresses, or exact customer wording.
+
+The server promotes each reusable lesson into durable memory and includes recent usage examples in future agent prompts. Set `AUTO_LEARN_FROM_USAGE=false` to disable automatic learning. A completed session can also be manually distilled with:
+
+```bash
+curl -X POST /api/sessions/<session-id>/learn
+```
+
+Recent learned examples are exposed at `/api/usage-examples`.
+
 ## Railway Deploy
 
 This repo includes `railway.json` with:
@@ -52,6 +65,10 @@ OPENAI_POLL_INTERVAL_MS=2500
 OPENAI_RESPONSE_TIMEOUT_MS=720000
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 TRAINING_MEMORY_PATH=
+AUTO_LEARN_FROM_USAGE=true
+MAX_USAGE_EXAMPLES_IN_PROMPT=8
+MAX_USAGE_LESSONS_IN_PROMPT=24
+MAX_USAGE_LESSONS_PER_EXAMPLE=6
 ```
 
 Deploy with the Railway dashboard or CLI:

@@ -210,6 +210,10 @@ span {
   border-left-color: var(--green);
 }
 
+.memory-item.usage {
+  border-left-color: var(--blue);
+}
+
 .workspace {
   min-width: 0;
   display: grid;
