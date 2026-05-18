@@ -43,7 +43,7 @@ function setStatus(status) {
     error: "Error"
   };
   els.statusPill.textContent = labels[status] || status || "Idle";
-  els.sendButton.disabled = ["queued", "planning", "editing"].includes(status);
+  els.sendButton.disabled = false;
 }
 
 async function compressImage(file) {
@@ -83,12 +83,17 @@ async function addFiles(fileList) {
 
 function renderUploadPreview() {
   els.uploadPreview.innerHTML = "";
-  for (const file of state.files) {
+  state.files.forEach((file, index) => {
+    const item = document.createElement("div");
+    item.className = "upload-preview-item";
     const img = document.createElement("img");
     img.src = file.dataUrl;
-    img.alt = file.name;
-    els.uploadPreview.append(img);
-  }
+    img.alt = `Image ${index + 1}`;
+    const badge = document.createElement("span");
+    badge.textContent = index + 1;
+    item.append(img, badge);
+    els.uploadPreview.append(item);
+  });
 }
 
 function renderMessages(turns = []) {
@@ -142,7 +147,8 @@ function renderGallery(photos = [], sessionStatus = "idle") {
   els.gallery.className = "gallery";
   els.gallery.innerHTML = "";
   const isRunning = ["queued", "planning", "editing"].includes(sessionStatus);
-  for (const photo of photos) {
+  photos.forEach((photo, index) => {
+    const displayNumber = index + 1;
     const card = document.createElement("article");
     card.className = "photo-card";
     const hasStaged = Boolean(photo.latest_data_url);
@@ -155,6 +161,10 @@ function renderGallery(photos = [], sessionStatus = "idle") {
     img.src = mode === "original" ? photo.original_data_url : photo.latest_data_url;
     img.alt = photo.room_label || photo.name;
     media.append(img);
+    const numberBadge = document.createElement("div");
+    numberBadge.className = "photo-number-badge";
+    numberBadge.textContent = displayNumber;
+    media.append(numberBadge);
     if (!hasStaged) {
       const chip = document.createElement("div");
       chip.className = "photo-progress-chip";
@@ -168,7 +178,11 @@ function renderGallery(photos = [], sessionStatus = "idle") {
     const titleRow = document.createElement("div");
     titleRow.className = "photo-title-row";
     const title = document.createElement("strong");
-    title.textContent = photo.room_label || photo.name;
+    const label = photo.room_label || photo.name || "";
+    const duplicateNumber = new RegExp(`^image\\s*${displayNumber}\\b`, "i").test(label);
+    title.textContent = duplicateNumber
+      ? label
+      : `Image ${displayNumber}${label ? ` - ${label}` : ""}`;
     const count = document.createElement("span");
     count.textContent = hasStaged
       ? "Staged ready"
@@ -206,13 +220,13 @@ function renderGallery(photos = [], sessionStatus = "idle") {
     body.append(titleRow, segmented);
     card.append(media, body);
     els.gallery.append(card);
-  }
+  });
 }
 
 function renderSession(session) {
   state.sessionId = session.id;
   setStatus(session.status);
-  els.sessionSummary.textContent = session.plan?.summary || "The staging agents are working through layout, theme, and edits.";
+  els.sessionSummary.textContent = "";
   renderMessages(session.turns || []);
   renderProgress(session.progress || [], session.status);
   renderGallery(session.photos || [], session.status);
