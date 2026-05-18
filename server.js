@@ -640,6 +640,26 @@ async function recordProgress(sessionId, message, meta = {}) {
   }
 }
 
+async function withProgressHeartbeat(sessionId, message, meta, work, intervalMs = 60 * 1000) {
+  let elapsed = 0;
+  const timer = setInterval(() => {
+    elapsed += intervalMs;
+    const progressMessage = typeof message === "function" ? message(elapsed) : message;
+    recordProgress(sessionId, progressMessage, {
+      ...meta,
+      heartbeat: true,
+      elapsed_ms: elapsed
+    }).catch((error) => {
+      console.error(`Progress heartbeat failed for ${sessionId}: ${error.message}`);
+    });
+  }, intervalMs);
+  try {
+    return await work();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 async function loadTrainingMemory() {
   try {
     const raw = await fs.readFile(TRAINING_MEMORY_PATH, "utf8");
@@ -856,11 +876,16 @@ async function runAgent(role, session, memories, usageExamples, feedback) {
       role,
       image_inputs: OPENAI_AGENT_IMAGE_INPUTS
     });
-    const response = await safeResponses(responsePayload({
-      model: TEXT_MODEL,
-      input: [{ role: "user", content }],
-      maxOutputTokens: 6000
-    }), { responseTimeoutMs: OPENAI_AGENT_TIMEOUT_MS });
+    const response = await withProgressHeartbeat(
+      session.id,
+      () => `Still waiting for planning agent: ${role}.`,
+      { stage: "planning", role },
+      () => safeResponses(responsePayload({
+        model: TEXT_MODEL,
+        input: [{ role: "user", content }],
+        maxOutputTokens: 6000
+      }), { responseTimeoutMs: OPENAI_AGENT_TIMEOUT_MS }),
+    );
     await recordProgress(session.id, `Planning agent finished: ${role}.`, { stage: "planning", role });
     return { role, text: extractText(response), timed_out: false };
   } catch (error) {
@@ -942,11 +967,16 @@ async function synthesizePlan(session, agentOutputs, memories, usageExamples, fe
   ].filter(Boolean).join("\n\n");
 
   try {
-    const response = await safeResponses(responsePayload({
-      model: TEXT_MODEL,
-      input: prompt,
-      maxOutputTokens: 8000
-    }), { responseTimeoutMs: OPENAI_SYNTHESIS_TIMEOUT_MS });
+    const response = await withProgressHeartbeat(
+      session.id,
+      "Still synthesizing the apartment-wide design plan.",
+      { stage: "planning" },
+      () => safeResponses(responsePayload({
+        model: TEXT_MODEL,
+        input: prompt,
+        maxOutputTokens: 8000
+      }), { responseTimeoutMs: OPENAI_SYNTHESIS_TIMEOUT_MS }),
+    );
     return parseJsonish(extractText(response), fallbackPlan(session, feedback));
   } catch (error) {
     await recordProgress(session.id, "Plan synthesis timed out; using the safe staging fallback plan.", {
@@ -1080,7 +1110,17 @@ async function generateEdits(session, plan, feedback) {
         photo_index: index + 1,
         total_photos: session.photos.length
       });
-      const latest = await generatePhotoEdit(photo, plan, item, feedback);
+      const latest = await withProgressHeartbeat(
+        session.id,
+        () => `Still creating staged image ${index + 1} of ${session.photos.length}.`,
+        {
+          stage: "editing",
+          photo_id: photo.id,
+          photo_index: index + 1,
+          total_photos: session.photos.length
+        },
+        () => generatePhotoEdit(photo, plan, item, feedback),
+      );
       await store.updatePhoto(photo.id, {
         latest_data_url: latest,
         room_label: item.room_label || photo.room_label || `Room ${index + 1}`,
