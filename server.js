@@ -20,14 +20,20 @@ const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT || "xhigh";
 const OPENAI_BACKGROUND_MODE = (process.env.OPENAI_BACKGROUND_MODE || "true").toLowerCase() !== "false";
 const OPENAI_POLL_INTERVAL_MS = Number(process.env.OPENAI_POLL_INTERVAL_MS || 2500);
 const OPENAI_RESPONSE_TIMEOUT_MS = Number(process.env.OPENAI_RESPONSE_TIMEOUT_MS || 12 * 60 * 1000);
+const OPENAI_AGENT_TIMEOUT_MS = Number(process.env.OPENAI_AGENT_TIMEOUT_MS || 90 * 1000);
+const OPENAI_SYNTHESIS_TIMEOUT_MS = Number(process.env.OPENAI_SYNTHESIS_TIMEOUT_MS || 90 * 1000);
+const OPENAI_EDIT_TIMEOUT_MS = Number(process.env.OPENAI_EDIT_TIMEOUT_MS || 5 * 60 * 1000);
 const OPENAI_DEFAULT_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_DEFAULT_MAX_OUTPUT_TOKENS || 8000);
 const OPENAI_RETRY_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_RETRY_MAX_OUTPUT_TOKENS || 16000);
+const OPENAI_AGENT_IMAGE_INPUTS = (process.env.OPENAI_AGENT_IMAGE_INPUTS || "false").toLowerCase() === "true";
 const MAX_IMAGE_COUNT = Number(process.env.MAX_IMAGE_COUNT || 8);
 const MAX_JSON_BODY_BYTES = Number(process.env.MAX_JSON_BODY_BYTES || 32 * 1024 * 1024);
 const AUTO_LEARN_FROM_USAGE = (process.env.AUTO_LEARN_FROM_USAGE || "true").toLowerCase() !== "false";
 const MAX_USAGE_EXAMPLES_IN_PROMPT = Number(process.env.MAX_USAGE_EXAMPLES_IN_PROMPT || 8);
 const MAX_USAGE_LESSONS_IN_PROMPT = Number(process.env.MAX_USAGE_LESSONS_IN_PROMPT || 24);
 const MAX_USAGE_LESSONS_PER_EXAMPLE = Number(process.env.MAX_USAGE_LESSONS_PER_EXAMPLE || 6);
+const OPENAI_EDIT_CONCURRENCY = Math.max(1, Number(process.env.OPENAI_EDIT_CONCURRENCY || 2));
+const RESUME_ACTIVE_SESSIONS_LIMIT = Math.max(0, Number(process.env.RESUME_ACTIVE_SESSIONS_LIMIT || 10));
 
 const jobs = new Set();
 let trainingMemory = {
@@ -41,6 +47,15 @@ function id(prefix) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function logSession(sessionId, message, meta = {}) {
+  console.log(JSON.stringify({
+    at: nowIso(),
+    session_id: sessionId,
+    message,
+    ...meta
+  }));
 }
 
 function jsonResponse(res, status, body) {
@@ -215,6 +230,13 @@ class JsonStore {
     if (!photo) return;
     Object.assign(photo, patch, { updated_at: nowIso() });
     await this.save();
+  }
+
+  async listRunnableSessions(limit = RESUME_ACTIVE_SESSIONS_LIMIT) {
+    return this.db.sessions
+      .filter((row) => ["queued", "planning", "editing"].includes(row.status))
+      .sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at)))
+      .slice(0, limit);
   }
 
   async listMemories() {
@@ -431,6 +453,18 @@ class PgStore {
     );
   }
 
+  async listRunnableSessions(limit = RESUME_ACTIVE_SESSIONS_LIMIT) {
+    const result = await this.pool.query(
+      `select id, status, updated_at
+       from sessions
+       where status in ('queued', 'planning', 'editing')
+       order by updated_at asc
+       limit $1`,
+      [limit]
+    );
+    return result.rows;
+  }
+
   async listMemories() {
     const result = await this.pool.query("select * from memories order by updated_at desc");
     return result.rows;
@@ -525,7 +559,7 @@ async function loadTrainingMemory() {
   }
 }
 
-async function openaiResponses(payload) {
+async function openaiResponses(payload, options = {}) {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
@@ -534,7 +568,7 @@ async function openaiResponses(payload) {
     body: JSON.stringify(payload)
   });
   if (payload.background && response.id) {
-    return pollOpenAIResponse(response);
+    return pollOpenAIResponse(response, options.responseTimeoutMs || OPENAI_RESPONSE_TIMEOUT_MS);
   }
   return response;
 }
@@ -559,12 +593,12 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function pollOpenAIResponse(initialResponse) {
+async function pollOpenAIResponse(initialResponse, timeoutMs = OPENAI_RESPONSE_TIMEOUT_MS) {
   let response = initialResponse;
   const startedAt = Date.now();
   while (["queued", "in_progress"].includes(response.status)) {
-    if (Date.now() - startedAt > OPENAI_RESPONSE_TIMEOUT_MS) {
-      throw new Error(`OpenAI background response ${response.id} timed out after ${OPENAI_RESPONSE_TIMEOUT_MS}ms`);
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`OpenAI background response ${response.id} timed out after ${timeoutMs}ms`);
     }
     await sleep(OPENAI_POLL_INTERVAL_MS);
     response = await openaiFetch(`/v1/responses/${response.id}`);
@@ -591,12 +625,12 @@ function responsePayload({ model, input, tools, maxOutputTokens = OPENAI_DEFAULT
   return payload;
 }
 
-async function safeResponses(payload) {
+async function safeResponses(payload, options = {}) {
   let current = { ...payload };
   let removedReasoning = false;
   while (true) {
     try {
-      return await openaiResponses(current);
+      return await openaiResponses(current, options);
     } catch (error) {
       if (!removedReasoning && current.reasoning && /reasoning|effort|unsupported/i.test(error.message)) {
         current = { ...current };
@@ -694,18 +728,31 @@ function agentPrompt(role, brief, memories, usageExamples, feedback) {
 }
 
 async function runAgent(role, session, memories, usageExamples, feedback) {
-  const response = await safeResponses(responsePayload({
-    model: TEXT_MODEL,
-    input: [{
-      role: "user",
-      content: [
-        { type: "input_text", text: agentPrompt(role, session.turns.at(-1)?.content || "", memories, usageExamples, feedback) },
-        ...imageInputs(session.photos)
-      ]
-    }],
-    maxOutputTokens: 10000
-  }));
-  return { role, text: extractText(response) };
+  const content = [
+    { type: "input_text", text: agentPrompt(role, session.turns.at(-1)?.content || "", memories, usageExamples, feedback) }
+  ];
+  if (OPENAI_AGENT_IMAGE_INPUTS) content.push(...imageInputs(session.photos));
+
+  try {
+    logSession(session.id, "planning_agent_started", { role, image_inputs: OPENAI_AGENT_IMAGE_INPUTS });
+    const response = await safeResponses(responsePayload({
+      model: TEXT_MODEL,
+      input: [{ role: "user", content }],
+      maxOutputTokens: 6000
+    }), { responseTimeoutMs: OPENAI_AGENT_TIMEOUT_MS });
+    logSession(session.id, "planning_agent_completed", { role });
+    return { role, text: extractText(response) };
+  } catch (error) {
+    logSession(session.id, "planning_agent_failed", { role, error: error.message });
+    return {
+      role,
+      text: [
+        "This specialist did not complete before the planning timeout.",
+        "Use conservative premium virtual-staging defaults: preserve all architecture, keep circulation clear, use cohesive warm-modern luxury furniture, keep windows and doors unobstructed, and prioritize spacious listing appeal.",
+        `Failure detail: ${error.message}`
+      ].join("\n")
+    };
+  }
 }
 
 function fallbackPlan(session, feedback = "") {
@@ -760,12 +807,17 @@ async function synthesizePlan(session, agentOutputs, memories, usageExamples, fe
     `Agent notes:\n${agentOutputs.map((item) => `## ${item.role}\n${item.text}`).join("\n\n")}`
   ].filter(Boolean).join("\n\n");
 
-  const response = await safeResponses(responsePayload({
-    model: TEXT_MODEL,
-    input: prompt,
-    maxOutputTokens: 12000
-  }));
-  return parseJsonish(extractText(response), fallbackPlan(session, feedback));
+  try {
+    const response = await safeResponses(responsePayload({
+      model: TEXT_MODEL,
+      input: prompt,
+      maxOutputTokens: 8000
+    }), { responseTimeoutMs: OPENAI_SYNTHESIS_TIMEOUT_MS });
+    return parseJsonish(extractText(response), fallbackPlan(session, feedback));
+  } catch (error) {
+    logSession(session.id, "plan_synthesis_failed", { error: error.message });
+    return fallbackPlan(session, feedback);
+  }
 }
 
 async function generatePlan(session, feedback) {
@@ -780,8 +832,11 @@ async function generatePlan(session, feedback) {
     "NYC leasing photographer focused on buyer impact, light, spaciousness, and listing appeal",
     "practical staging critic focused on realism, furniture scale, blocked windows, blocked doors, and avoidable customer complaints"
   ];
+  logSession(session.id, "planning_started", { photos: session.photos.length, roles: roles.length });
   const agentOutputs = await Promise.all(roles.map((role) => runAgent(role, session, memories, usageExamples, feedback)));
-  return synthesizePlan(session, agentOutputs, memories, usageExamples, feedback);
+  const plan = await synthesizePlan(session, agentOutputs, memories, usageExamples, feedback);
+  logSession(session.id, "planning_completed", { per_photo: plan.per_photo?.length || 0 });
+  return plan;
 }
 
 function photoPlan(plan, photo, index) {
@@ -817,41 +872,79 @@ async function generatePhotoEdit(photo, plan, item, feedback) {
     input: [{ role: "user", content }],
     tools: [{
       type: "image_generation",
-      action: "edit",
       quality: "high",
       size: "auto",
       output_format: "jpeg"
     }],
     maxOutputTokens: 4000
-  }));
+  }), { responseTimeoutMs: OPENAI_EDIT_TIMEOUT_MS });
   const b64 = extractGeneratedImage(response);
-  return b64 ? `data:image/jpeg;base64,${b64}` : "";
+  if (!b64) {
+    throw new Error("OpenAI image generation completed without returning an edited image");
+  }
+  return `data:image/jpeg;base64,${b64}`;
 }
 
 async function generateEdits(session, plan, feedback) {
-  const updated = [];
-  for (let index = 0; index < session.photos.length; index += 1) {
+  const results = [];
+  let nextIndex = 0;
+
+  async function editOne(index) {
     const photo = session.photos[index];
     const item = photoPlan(plan, photo, index);
-    const latest = await generatePhotoEdit(photo, plan, item, feedback);
     const editHistory = Array.isArray(photo.edit_history) ? photo.edit_history : [];
-    const nextHistory = [
-      ...editHistory,
-      {
-        at: nowIso(),
-        feedback: feedback || "",
-        plan: item,
-        generated: Boolean(latest)
-      }
-    ];
-    await store.updatePhoto(photo.id, {
-      latest_data_url: latest || photo.latest_data_url || "",
-      room_label: item.room_label || photo.room_label || `Room ${index + 1}`,
-      edit_history: nextHistory
-    });
-    updated.push(photo.id);
+    try {
+      logSession(session.id, "photo_edit_started", { photo_id: photo.id, photo_index: index + 1 });
+      const latest = await generatePhotoEdit(photo, plan, item, feedback);
+      await store.updatePhoto(photo.id, {
+        latest_data_url: latest,
+        room_label: item.room_label || photo.room_label || `Room ${index + 1}`,
+        edit_history: [
+          ...editHistory,
+          {
+            at: nowIso(),
+            feedback: feedback || "",
+            plan: item,
+            generated: true
+          }
+        ]
+      });
+      logSession(session.id, "photo_edit_completed", { photo_id: photo.id, photo_index: index + 1 });
+      results.push({ photo_id: photo.id, generated: true });
+    } catch (error) {
+      await store.updatePhoto(photo.id, {
+        room_label: item.room_label || photo.room_label || `Room ${index + 1}`,
+        edit_history: [
+          ...editHistory,
+          {
+            at: nowIso(),
+            feedback: feedback || "",
+            plan: item,
+            generated: false,
+            error: error.message
+          }
+        ]
+      });
+      logSession(session.id, "photo_edit_failed", { photo_id: photo.id, photo_index: index + 1, error: error.message });
+      results.push({ photo_id: photo.id, generated: false, error: error.message });
+    }
   }
-  return updated;
+
+  async function worker() {
+    while (nextIndex < session.photos.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      await editOne(index);
+    }
+  }
+
+  const workerCount = Math.min(OPENAI_EDIT_CONCURRENCY, session.photos.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (!results.some((result) => result.generated)) {
+    const detail = results.find((result) => result.error)?.error || "no edited image output";
+    throw new Error(`No staged images were generated: ${detail}`);
+  }
+  return results;
 }
 
 async function deriveDurableMemory(sessionId, feedback) {
@@ -974,28 +1067,46 @@ async function processSession(sessionId, feedback = "") {
   if (jobs.has(sessionId)) return;
   jobs.add(sessionId);
   try {
+    logSession(sessionId, "job_started", { feedback: Boolean(feedback) });
     await store.updateSession(sessionId, { status: "planning" });
     let session = await store.getSession(sessionId);
     const plan = await generatePlan(session, feedback);
     await store.updateSession(sessionId, { status: "editing", plan });
+    logSession(sessionId, "editing_started", { photos: session.photos.length });
     await store.addTurn(sessionId, "assistant", plan.customer_reply || plan.summary || "I created the staging plan.", {
       kind: feedback ? "feedback_plan" : "initial_plan",
       plan
     });
     session = await store.getSession(sessionId);
-    await generateEdits(session, plan, feedback);
+    const editResults = await generateEdits(session, plan, feedback);
     if (feedback) await deriveDurableMemory(sessionId, feedback);
     await store.updateSession(sessionId, { status: "ready" });
+    logSession(sessionId, "job_ready", {
+      generated: editResults.filter((result) => result.generated).length,
+      failed: editResults.filter((result) => !result.generated).length
+    });
     deriveUsageTrainingExample(sessionId, feedback).catch((error) => {
       console.error(`Usage learning failed for ${sessionId}: ${error.message}`);
     });
   } catch (error) {
+    logSession(sessionId, "job_failed", { error: error.message });
     await store.addTurn(sessionId, "assistant", `Generation failed: ${error.message}`, {
       kind: "error"
     });
     await store.updateSession(sessionId, { status: "error" });
   } finally {
     jobs.delete(sessionId);
+  }
+}
+
+async function resumeRunnableSessions() {
+  if (!RESUME_ACTIVE_SESSIONS_LIMIT) return;
+  const sessions = await store.listRunnableSessions(RESUME_ACTIVE_SESSIONS_LIMIT);
+  for (const session of sessions) {
+    logSession(session.id, "resuming_active_session", { previous_status: session.status });
+    processSession(session.id).catch((error) => {
+      logSession(session.id, "resume_failed", { error: error.message });
+    });
   }
 }
 
@@ -1141,6 +1252,7 @@ async function main() {
   });
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Virtual staging app listening on http://0.0.0.0:${PORT}`);
+    resumeRunnableSessions().catch((error) => console.error(`Could not resume active sessions: ${error.message}`));
   });
 }
 

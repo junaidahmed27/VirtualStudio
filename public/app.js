@@ -2,6 +2,7 @@ const state = {
   files: [],
   sessionId: "",
   polling: null,
+  pollingInFlight: false,
   visibleMode: new Map()
 };
 
@@ -170,12 +171,18 @@ function renderSession(session) {
 
 async function pollSession() {
   if (!state.sessionId) return;
-  const { session } = await api(`/api/sessions/${state.sessionId}`);
-  renderSession(session);
-  if (["ready", "error"].includes(session.status)) {
-    clearInterval(state.polling);
-    state.polling = null;
-    await loadMemory();
+  if (state.pollingInFlight) return;
+  state.pollingInFlight = true;
+  try {
+    const { session } = await api(`/api/sessions/${state.sessionId}`);
+    renderSession(session);
+    if (["ready", "error"].includes(session.status)) {
+      clearInterval(state.polling);
+      state.polling = null;
+      await loadMemory();
+    }
+  } finally {
+    state.pollingInFlight = false;
   }
 }
 
