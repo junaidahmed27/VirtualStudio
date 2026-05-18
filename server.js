@@ -21,8 +21,8 @@ const OPENAI_BACKGROUND_MODE = (process.env.OPENAI_BACKGROUND_MODE || "true").to
 const OPENAI_POLL_INTERVAL_MS = Number(process.env.OPENAI_POLL_INTERVAL_MS || 2500);
 const OPENAI_RESPONSE_TIMEOUT_MS = Number(process.env.OPENAI_RESPONSE_TIMEOUT_MS || 12 * 60 * 1000);
 const OPENAI_HTTP_TIMEOUT_MS = Number(process.env.OPENAI_HTTP_TIMEOUT_MS || 60 * 1000);
-const OPENAI_AGENT_TIMEOUT_MS = Number(process.env.OPENAI_AGENT_TIMEOUT_MS || 90 * 1000);
-const OPENAI_SYNTHESIS_TIMEOUT_MS = Number(process.env.OPENAI_SYNTHESIS_TIMEOUT_MS || 90 * 1000);
+const OPENAI_AGENT_TIMEOUT_MS = Number(process.env.OPENAI_AGENT_TIMEOUT_MS || 30 * 1000);
+const OPENAI_SYNTHESIS_TIMEOUT_MS = Number(process.env.OPENAI_SYNTHESIS_TIMEOUT_MS || 30 * 1000);
 const OPENAI_EDIT_TIMEOUT_MS = Number(process.env.OPENAI_EDIT_TIMEOUT_MS || 5 * 60 * 1000);
 const OPENAI_DEFAULT_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_DEFAULT_MAX_OUTPUT_TOKENS || 8000);
 const OPENAI_RETRY_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_RETRY_MAX_OUTPUT_TOKENS || 16000);
@@ -802,7 +802,7 @@ async function runAgent(role, session, memories, usageExamples, feedback) {
       maxOutputTokens: 6000
     }), { responseTimeoutMs: OPENAI_AGENT_TIMEOUT_MS });
     await recordProgress(session.id, `Planning agent finished: ${role}.`, { stage: "planning", role });
-    return { role, text: extractText(response) };
+    return { role, text: extractText(response), timed_out: false };
   } catch (error) {
     await recordProgress(session.id, `Planning agent timed out; using conservative defaults for ${role}.`, {
       stage: "planning",
@@ -815,7 +815,8 @@ async function runAgent(role, session, memories, usageExamples, feedback) {
         "This specialist did not complete before the planning timeout.",
         "Use conservative premium virtual-staging defaults: preserve all architecture, keep circulation clear, use cohesive warm-modern luxury furniture, keep windows and doors unobstructed, and prioritize spacious listing appeal.",
         `Failure detail: ${error.message}`
-      ].join("\n")
+      ].join("\n"),
+      timed_out: true
     };
   }
 }
@@ -852,6 +853,13 @@ function fallbackPlan(session, feedback = "") {
 }
 
 async function synthesizePlan(session, agentOutputs, memories, usageExamples, feedback) {
+  if (agentOutputs.length && agentOutputs.every((item) => item.timed_out)) {
+    await recordProgress(session.id, "All planning agents timed out; using the safe staging fallback plan immediately.", {
+      stage: "planning"
+    });
+    return fallbackPlan(session, feedback);
+  }
+
   const prompt = [
     "You are the final design director. Synthesize these specialist agent notes into one apartment-wide virtual staging plan.",
     "Return JSON only. Match this shape:",
