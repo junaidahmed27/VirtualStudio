@@ -15,7 +15,7 @@ const TRAINING_MEMORY_PATH = process.env.TRAINING_MEMORY_PATH
 const PORT = Number(process.env.PORT || 3000);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const TEXT_MODEL = process.env.OPENAI_TEXT_MODEL || "gpt-5.5-pro";
-const IMAGE_RESPONSE_MODEL = process.env.OPENAI_IMAGE_RESPONSE_MODEL || "gpt-5.5-pro";
+const IMAGE_EDIT_MODEL = process.env.OPENAI_IMAGE_EDIT_MODEL || "gpt-image-1.5";
 const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT || "xhigh";
 const OPENAI_BACKGROUND_MODE = (process.env.OPENAI_BACKGROUND_MODE || "true").toLowerCase() !== "false";
 const OPENAI_POLL_INTERVAL_MS = Number(process.env.OPENAI_POLL_INTERVAL_MS || 2500);
@@ -95,6 +95,18 @@ function sanitizePhoto(photo, index) {
     throw Object.assign(new Error(`${name} is not an image data URL`), { status: 400 });
   }
   return { name, mime, dataUrl };
+}
+
+function imageDataUrlToFile(dataUrl, fallbackMime = "image/jpeg") {
+  const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) throw new Error("Photo data is not a valid base64 image data URL");
+  const mime = match[1] || fallbackMime;
+  const buffer = Buffer.from(match[2], "base64");
+  const extension = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
+  return {
+    blob: new Blob([buffer], { type: mime }),
+    filename: `apartment-photo.${extension}`
+  };
 }
 
 function extractText(response) {
@@ -621,15 +633,17 @@ async function openaiFetch(pathname, init = {}, timeoutMs = OPENAI_HTTP_TIMEOUT_
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response;
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+  const headers = {
+    authorization: `Bearer ${OPENAI_API_KEY}`,
+    ...(isFormData ? {} : { "content-type": "application/json" }),
+    ...(init.headers || {})
+  };
   try {
     response = await fetch(`https://api.openai.com${pathname}`, {
       ...init,
       signal: init.signal || controller.signal,
-      headers: {
-        authorization: `Bearer ${OPENAI_API_KEY}`,
-        "content-type": "application/json",
-        ...(init.headers || {})
-      }
+      headers
     });
   } catch (error) {
     if (error.name === "AbortError") {
@@ -945,22 +959,19 @@ function editPrompt(plan, item, feedback) {
 
 async function generatePhotoEdit(photo, plan, item, feedback) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
-  const content = [
-    { type: "input_text", text: editPrompt(plan, item, feedback) },
-    { type: "input_image", image_url: photo.latest_data_url || photo.original_data_url, detail: "high" }
-  ];
+  const sourceImage = imageDataUrlToFile(photo.latest_data_url || photo.original_data_url, photo.mime);
+  const form = new FormData();
+  form.append("model", IMAGE_EDIT_MODEL);
+  form.append("image", sourceImage.blob, sourceImage.filename);
+  form.append("prompt", editPrompt(plan, item, feedback));
+  form.append("quality", "high");
+  form.append("size", "auto");
+  form.append("output_format", "jpeg");
 
-  const response = await safeResponses(responsePayload({
-    model: IMAGE_RESPONSE_MODEL,
-    input: [{ role: "user", content }],
-    tools: [{
-      type: "image_generation",
-      quality: "high",
-      size: "auto",
-      output_format: "jpeg"
-    }],
-    maxOutputTokens: 4000
-  }), { responseTimeoutMs: OPENAI_EDIT_TIMEOUT_MS });
+  const response = await openaiFetch("/v1/images/edits", {
+    method: "POST",
+    body: form
+  }, OPENAI_EDIT_TIMEOUT_MS);
   const b64 = extractGeneratedImage(response);
   if (!b64) {
     throw new Error("OpenAI image generation completed without returning an edited image");

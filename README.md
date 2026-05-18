@@ -14,7 +14,7 @@ A Railway-ready chat app for staging empty NYC apartment photos with multiple Op
 - Loads checked-in Units #1-#5 before/after exemplar memory so every new job starts with a broader baseline taste profile and fixed-layout constraints.
 - Distills completed usage into reusable server-side training examples, then feeds those lessons back into future planning prompts.
 
-The app follows OpenAI's current guidance for image workflows: the Responses API supports image inputs and multi-turn image generation/editing with the `image_generation` tool. The default configuration uses `gpt-5.5-pro` with `reasoning.effort=xhigh` and background-mode polling for deep, long-running staging work. The Responses image-generation tool uses OpenAI's GPT Image model selection internally, while the Image API exposes `gpt-image-2` for direct single-image generation/editing workflows.
+The app uses the Responses API for planning and the Images edit endpoint for direct virtual-staging photo edits. The default configuration uses `gpt-5.5-pro` with `reasoning.effort=xhigh` for planning and `gpt-image-1.5` for edited image generation.
 
 ## Local Setup
 
@@ -59,7 +59,7 @@ Required Railway variables:
 ```bash
 OPENAI_API_KEY=...
 OPENAI_TEXT_MODEL=gpt-5.5-pro
-OPENAI_IMAGE_RESPONSE_MODEL=gpt-5.5-pro
+OPENAI_IMAGE_EDIT_MODEL=gpt-image-1.5
 OPENAI_REASONING_EFFORT=xhigh
 OPENAI_BACKGROUND_MODE=true
 OPENAI_POLL_INTERVAL_MS=2500
