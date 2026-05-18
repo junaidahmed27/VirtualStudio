@@ -343,6 +343,14 @@ class JsonStore {
 }
 
 class PgStore {
+  jsonb(value) {
+    return JSON.stringify(value ?? null);
+  }
+
+  jsonbAssignment(key, position, jsonbFields) {
+    return jsonbFields.has(key) ? `${key} = $${position}::jsonb` : `${key} = $${position}`;
+  }
+
   async init() {
     const { Pool } = await import("pg");
     this.pool = new Pool({
@@ -430,8 +438,8 @@ class PgStore {
         );
       }
       await client.query(
-        "insert into turns (id, session_id, role, content, meta) values ($1, $2, $3, $4, $5)",
-        [id("turn"), sessionId, "user", message, { kind: "initial" }]
+        "insert into turns (id, session_id, role, content, meta) values ($1, $2, $3, $4, $5::jsonb)",
+        [id("turn"), sessionId, "user", message, this.jsonb({ kind: "initial" })]
       );
       await client.query("commit");
     } catch (error) {
@@ -455,9 +463,10 @@ class PgStore {
   async updateSession(sessionId, patch) {
     const fields = [];
     const values = [];
+    const jsonbFields = new Set(["plan"]);
     for (const [key, value] of Object.entries(patch)) {
-      values.push(value);
-      fields.push(`${key} = $${values.length}`);
+      values.push(jsonbFields.has(key) ? this.jsonb(value) : value);
+      fields.push(this.jsonbAssignment(key, values.length, jsonbFields));
     }
     if (!fields.length) return;
     values.push(sessionId);
@@ -469,17 +478,17 @@ class PgStore {
 
   async addTurn(sessionId, role, content, meta = {}) {
     await this.pool.query(
-      "insert into turns (id, session_id, role, content, meta) values ($1, $2, $3, $4, $5)",
-      [id("turn"), sessionId, role, content, meta]
+      "insert into turns (id, session_id, role, content, meta) values ($1, $2, $3, $4, $5::jsonb)",
+      [id("turn"), sessionId, role, content, this.jsonb(meta)]
     );
   }
 
   async addProgress(sessionId, message, meta = {}) {
     const result = await this.pool.query(
       `insert into progress_events (id, session_id, message, meta)
-       values ($1, $2, $3, $4)
+       values ($1, $2, $3, $4::jsonb)
        returning *`,
-      [id("evt"), sessionId, message, meta]
+      [id("evt"), sessionId, message, this.jsonb(meta)]
     );
     return result.rows[0];
   }
@@ -487,9 +496,10 @@ class PgStore {
   async updatePhoto(photoId, patch) {
     const fields = [];
     const values = [];
+    const jsonbFields = new Set(["edit_history"]);
     for (const [key, value] of Object.entries(patch)) {
-      values.push(value);
-      fields.push(`${key} = $${values.length}`);
+      values.push(jsonbFields.has(key) ? this.jsonb(value) : value);
+      fields.push(this.jsonbAssignment(key, values.length, jsonbFields));
     }
     if (!fields.length) return;
     values.push(photoId);
@@ -536,7 +546,7 @@ class PgStore {
     const result = await this.pool.query(
       `insert into usage_examples
        (id, source_session_id, source_turn_count, summary, customer_brief, feedback, room_labels, theme, reusable_lessons, quality_signals)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)
        on conflict (source_session_id, source_turn_count)
        do update set
          summary = excluded.summary,
@@ -555,10 +565,10 @@ class PgStore {
         example.summary || "Reusable staging example",
         example.customer_brief || "",
         example.feedback || "",
-        example.room_labels || [],
-        example.theme || {},
-        example.reusable_lessons,
-        example.quality_signals || []
+        this.jsonb(example.room_labels || []),
+        this.jsonb(example.theme || {}),
+        this.jsonb(example.reusable_lessons),
+        this.jsonb(example.quality_signals || [])
       ]
     );
     return result.rows[0];
