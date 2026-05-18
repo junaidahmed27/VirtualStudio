@@ -200,9 +200,16 @@ async function loadMemory() {
   if (trainingLessons.length) {
     const heading = document.createElement("div");
     heading.className = "memory-heading";
-    heading.textContent = training.name || "Training exemplar";
+    heading.textContent = `${training.name || "Training exemplar"} (${trainingLessons.length} lessons)`;
     els.memoryList.append(heading);
-    for (const lesson of trainingLessons.slice(0, 5)) {
+    const sets = training?.exemplar_sets || [];
+    if (sets.length) {
+      const setSummary = document.createElement("div");
+      setSummary.className = "memory-item training";
+      setSummary.textContent = `Examples: ${sets.map((item) => item.unit).join(", ")}`;
+      els.memoryList.append(setSummary);
+    }
+    for (const lesson of trainingLessons.slice(0, 8)) {
       const item = document.createElement("div");
       item.className = "memory-item training";
       item.textContent = lesson;

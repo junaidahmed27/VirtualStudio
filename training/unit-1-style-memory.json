@@ -1,24 +1,47 @@
 {
-  "name": "Unit #1 before-after staging exemplar",
+  "name": "Units #1-#5 before-after staging exemplars",
   "source": {
-    "local_reference": "Downloads/Unit #1",
-    "note": "The source photos are private local references. The repository stores only distilled reusable staging lessons, not the listing photos or absolute local paths.",
-    "originals": [
-      "shoootin-photo-2-Edit (3).jpg",
-      "shoootin-photo-3-Edit (4).jpg",
-      "shoootin-photo-4-Edit (3).jpg",
-      "shoootin-photo-5-Edit (4).jpg",
-      "shoootin-photo-6-Edit (3).jpg"
-    ],
-    "staged": [
-      "ChatGPT Image May 6, 2026, 02_34_09 PM (1).png",
-      "ChatGPT Image May 6, 2026, 02_36_48 PM (1).png",
-      "ChatGPT Image May 6, 2026, 02_40_17 PM (1).png",
-      "ChatGPT Image May 6, 2026, 02_44_16 PM (1).png",
-      "ChatGPT Image May 6, 2026, 04_06_15 PM (1).png"
-    ]
+    "local_reference": "Downloads/Unit #1 through Unit #5",
+    "note": "The source photos are private local references. The repository stores only distilled reusable staging lessons, not the listing photos, individual image filenames, or absolute local paths."
   },
-  "summary": "Use Unit #1 as the baseline taste profile for empty NYC apartments: warm modern luxury, high-end but plausible furniture, consistent palette and materials across the entire unit, and strict preservation of fixed architecture.",
+  "exemplar_sets": [
+    {
+      "unit": "Unit #1",
+      "local_reference": "Downloads/Unit #1",
+      "original_count": 5,
+      "staged_count": 5,
+      "style_note": "Warm modern gallery apartment with cream, taupe, walnut, brass, neutral art, and light removable kitchen and bath styling."
+    },
+    {
+      "unit": "Unit #2",
+      "local_reference": "Downloads/Unit #2",
+      "original_count": 8,
+      "staged_count": 8,
+      "style_note": "Compact open-plan apartment using cream seating, walnut furniture, rounded tables, green plants, restrained art, and strict clearance around kitchen, windows, closets, and radiators."
+    },
+    {
+      "unit": "Unit #3",
+      "local_reference": "Downloads/Unit #3",
+      "original_count": 5,
+      "staged_count": 5,
+      "style_note": "Darker urban luxury variant with charcoal, gray, rust, olive, dark walnut, brass, marble or stone cues, and cohesive room-to-room contrast."
+    },
+    {
+      "unit": "Unit #4",
+      "local_reference": "Downloads/Unit #4",
+      "original_count": 6,
+      "staged_count": 6,
+      "style_note": "Moody prewar staging with black window frames, classic trim, radiator covers, deep green upholstery, black leather, dark rugs, brass lamps, and existing distinctive green bathroom tile."
+    },
+    {
+      "unit": "Unit #5",
+      "local_reference": "Downloads/Unit #5",
+      "original_count": 7,
+      "staged_count": 7,
+      "style_note": "Bright renovated white-and-black apartment with dark floors, cream upholstery, walnut case goods, black accents, minimal abstract art, visible radiators, window ACs, and restrained greenery."
+    }
+  ],
+  "summary": "Use Units #1-#5 as the baseline taste profile for empty NYC apartments: warm modern luxury by default, with allowed variants for compact open plans, moody prewar rooms, darker urban palettes, and bright renovated white-and-black units. Preserve fixed architecture, windows, radiators, PTAC/window AC units, doors, closets, appliances, tile, plumbing, and room proportions.",
   "durable_lessons": [
     "Use a cohesive warm modern luxury theme across the apartment: clean white shell, cream and taupe upholstery, dark walnut wood, brass or bronze accents, restrained black details, neutral abstract art, and soft greenery.",
     "Make the unit feel lavish and spacious through scale discipline: low-profile furniture, large quiet rugs, slim tables, clear negative space, and furniture groupings that leave obvious walkways.",
@@ -35,7 +58,27 @@
     "Use warm professional listing photography: bright whites stay clean, wood tones stay rich, shadows are soft, accessories are edited down, no clutter, no text, no labels, and no unrealistic scale.",
     "Prefer tenant-plausible pieces over renovation changes. Everything added should read as furniture, art, rug, lamp, plant, textile, or freestanding accessory unless the customer requests otherwise.",
     "If a room is not suitable for furniture, style it lightly with removable accessories or leave fixed surfaces untouched instead of forcing furniture into the image.",
-    "Minimize customer prompting by making a complete tasteful default plan first, then ask only if a true business constraint is missing."
+    "Minimize customer prompting by making a complete tasteful default plan first, then ask only if a true business constraint is missing.",
+    "For compact open-plan living rooms, place the sofa on the longest practical wall, put the TV or media console on a clean opposing wall, use a rounded or oval coffee table to soften circulation, and keep dining close to the kitchen without blocking entry paths.",
+    "In small living rooms, use one sofa plus one or two accent chairs only when there is still an obvious route to doors, windows, closets, kitchen openings, radiators, PTAC units, and window AC units.",
+    "A round dining table with two to four upholstered chairs is the default for compact NYC dining zones because it reads premium while preserving circulation.",
+    "Entry consoles, mirrors, and plants work well on blank wall segments, but they must not cover thermostats, intercoms, electrical panels, switches, outlets, door trim, or closet access.",
+    "For older white-cabinet kitchens, improve perceived value with clean removable styling: wood cutting boards, fruit bowl, herbs, dish towel, soap, coffee maker, and small ceramic objects. Do not repaint cabinets, change appliances, change hardware, or hide existing paper towel holders and vents.",
+    "For modern white kitchens with black hardware or black faucets, keep styling minimal: black canisters, warm wood boards, small plants, and a simple dining vignette. Do not add an island unless the original footprint clearly supports a movable table or island without crowding.",
+    "If a kitchen has a window radiator or pipe, keep that mechanical feature visible and serviceable. Do not place dining furniture, plants, rugs, or decor in a way that blocks radiator valves or window access.",
+    "For bedroom views with closets, open doors, radiators, PTAC units, or window AC units, anchor the bed on the clearest wall and keep all mechanical and door functions visible. Use mirrors or dressers only where they do not pinch the walkway.",
+    "A bedroom can use a darker urban palette when the unit supports it: gray or charcoal upholstered bed, dark walnut dresser, rust pillows or throw, olive accents, brass lamps, and a textured dark or jute rug. Repeat those accent colors in the living space so the apartment still feels coherent.",
+    "For moody prewar units with warm floors, black window frames, arches, thick trim, and radiator covers, use deep green or charcoal upholstery, black leather accent chairs, dark patterned rugs, blackened wood tables, brass arc lamps, and oversized restrained art.",
+    "For bright renovated white-and-black units, use cream or oatmeal upholstery, light oak or walnut case goods, black lamps and frames, minimal beige abstract art, and one or two substantial plants. Keep the styling calm and gallery-like rather than crowded.",
+    "Distinctive existing finishes should drive the staging palette. If a bathroom already has green terrazzo or bold tile, complement it with white towels, black or dark green soap accessories, candles, and plants; never recolor or replace the tile.",
+    "For bathrooms with glass shower doors, black fixtures, or modern vanities, use very few accessories: folded towels, soap dispenser, small plant, and tray. Do not add shelves, baskets, or wall decor that crowd the plumbing area.",
+    "For bathrooms with shower curtains, preserve the curtain rod and tub geometry. Use a clean white textured curtain, neutral towel, soap, small plant, and bath mat only if these do not hide fixtures.",
+    "TVs may be used to sell the lifestyle, but they should be on an existing blank wall or on a media console. Do not invent recessed wiring, new outlets, new fireplace structures, or wall niches for a TV.",
+    "If a fireplace, niche, ledge, built-in shelf, exposed brick face, or radiator cover already exists, style it with removable art, books, ceramics, plants, or a TV only if the original feature remains recognizable.",
+    "For wide-angle MLS photos, preserve the original lens perspective and wall geometry. Do not straighten walls by changing architecture, stretch furniture, or add oversized pieces that look plausible only because of lens distortion.",
+    "If multiple staged examples in the training set imply different styles, choose the style that best matches the fixed shell of the uploaded apartment, then apply it consistently across every photo in that session.",
+    "Quality beats quantity: a few expensive-looking pieces, disciplined negative space, and clear circulation should win over filling every empty corner.",
+    "When an example contains a strong design move, generalize the design principle instead of copying the exact object into every job."
   ],
   "room_guidance": {
     "bedroom": {
@@ -43,16 +86,16 @@
       "avoid": "Oversized beds, blocked closets, blocked windows, fake built-ins, heavy drapery, cluttered side tables, or inconsistent rustic styling."
     },
     "living_dining": {
-      "preferred_style": "Open, premium lounge-dining arrangement with beige seating, walnut case goods, cream rug, compact round dining setup, and restrained art.",
-      "avoid": "Furniture that blocks circulation, giant sectionals that shrink the room, mismatched dining style, or wall changes."
+      "preferred_style": "Open, premium lounge-dining arrangement with beige or deep green seating, walnut or blackened case goods, quiet rugs, compact round dining setup, and restrained art.",
+      "avoid": "Furniture that blocks circulation, giant sectionals that shrink the room, mismatched dining style, blocked window ACs, blocked radiators, or wall changes."
     },
     "kitchen": {
       "preferred_style": "Light styling with removable countertop accessories, herbs, cutting boards, soap, and runner rug while keeping the kitchen architecture unchanged.",
       "avoid": "Changed cabinetry, changed counters, new backsplash, hardwired pendant lights, appliance changes, or added islands."
     },
     "bathroom": {
-      "preferred_style": "Spa-like removable accessories only, with towels, tray, candle, soap, small plant, and clean surfaces.",
-      "avoid": "Changed tile, changed plumbing, changed mirror, changed fixtures, new storage, or altered tub and vanity geometry."
+      "preferred_style": "Spa-like removable accessories only, with towels, tray, candle, soap, small plant, and clean surfaces. Complement existing tile and fixture finishes instead of replacing them.",
+      "avoid": "Changed tile, changed plumbing, changed mirror, changed fixtures, new storage, or altered tub, shower, toilet, and vanity geometry."
     }
   }
 }
