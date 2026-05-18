@@ -427,6 +427,26 @@ class PgStore {
         created_at timestamptz not null default now()
       );
       alter table photos add column if not exists position integer not null default 0;
+      with sessions_needing_positions as (
+        select session_id
+        from photos
+        group by session_id
+        having count(*) > 1 and max(position) = 0
+      ),
+      ranked as (
+        select
+          photos.id,
+          row_number() over (
+            partition by photos.session_id
+            order by photos.created_at asc, photos.name asc, photos.id asc
+          ) - 1 as backfilled_position
+        from photos
+        join sessions_needing_positions on sessions_needing_positions.session_id = photos.session_id
+      )
+      update photos
+      set position = ranked.backfilled_position
+      from ranked
+      where photos.id = ranked.id;
     `);
   }
 
