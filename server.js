@@ -191,10 +191,11 @@ class JsonStore {
       updated_at: nowIso()
     };
     this.db.sessions.push(session);
-    for (const photo of photos) {
+    for (const [position, photo] of photos.entries()) {
       this.db.photos.push({
         id: id("pho"),
         session_id: session.id,
+        position,
         name: photo.name,
         mime: photo.mime,
         original_data_url: photo.dataUrl,
@@ -215,7 +216,13 @@ class JsonStore {
     if (!session) return null;
     return {
       ...session,
-      photos: this.db.photos.filter((row) => row.session_id === sessionId),
+      photos: this.db.photos
+        .filter((row) => row.session_id === sessionId)
+        .sort((a, b) =>
+          Number(a.position || 0) - Number(b.position || 0) ||
+          String(a.created_at).localeCompare(String(b.created_at)) ||
+          String(a.id).localeCompare(String(b.id))
+        ),
       turns: this.db.turns.filter((row) => row.session_id === sessionId),
       progress: this.db.progress_events.filter((row) => row.session_id === sessionId)
     };
@@ -379,6 +386,7 @@ class PgStore {
         session_id text not null references sessions(id) on delete cascade,
         name text not null,
         mime text not null,
+        position integer not null default 0,
         original_data_url text not null,
         latest_data_url text not null default '',
         room_label text not null default '',
@@ -418,6 +426,7 @@ class PgStore {
         meta jsonb not null default '{}'::jsonb,
         created_at timestamptz not null default now()
       );
+      alter table photos add column if not exists position integer not null default 0;
     `);
   }
 
@@ -430,11 +439,11 @@ class PgStore {
         "insert into sessions (id, title, status) values ($1, $2, 'queued')",
         [sessionId, title]
       );
-      for (const photo of photos) {
+      for (const [position, photo] of photos.entries()) {
         await client.query(
-          `insert into photos (id, session_id, name, mime, original_data_url)
-           values ($1, $2, $3, $4, $5)`,
-          [id("pho"), sessionId, photo.name, photo.mime, photo.dataUrl]
+          `insert into photos (id, session_id, position, name, mime, original_data_url)
+           values ($1, $2, $3, $4, $5, $6)`,
+          [id("pho"), sessionId, position, photo.name, photo.mime, photo.dataUrl]
         );
       }
       await client.query(
@@ -454,7 +463,10 @@ class PgStore {
   async getSession(sessionId) {
     const session = await this.pool.query("select * from sessions where id = $1", [sessionId]);
     if (!session.rows[0]) return null;
-    const photos = await this.pool.query("select * from photos where session_id = $1 order by created_at asc", [sessionId]);
+    const photos = await this.pool.query(
+      "select * from photos where session_id = $1 order by position asc, created_at asc, id asc",
+      [sessionId]
+    );
     const turns = await this.pool.query("select * from turns where session_id = $1 order by created_at asc", [sessionId]);
     const progress = await this.pool.query("select * from progress_events where session_id = $1 order by created_at asc", [sessionId]);
     return { ...session.rows[0], photos: photos.rows, turns: turns.rows, progress: progress.rows };
@@ -997,6 +1009,17 @@ async function generateEdits(session, plan, feedback) {
     const photo = session.photos[index];
     const item = photoPlan(plan, photo, index);
     const editHistory = Array.isArray(photo.edit_history) ? photo.edit_history : [];
+    if (!feedback && photo.latest_data_url) {
+      await recordProgress(session.id, `Staged image ${index + 1} of ${session.photos.length} was already ready.`, {
+        stage: "editing",
+        photo_id: photo.id,
+        photo_index: index + 1,
+        total_photos: session.photos.length,
+        skipped: true
+      });
+      results.push({ photo_id: photo.id, generated: true, skipped: true });
+      return;
+    }
     try {
       await recordProgress(session.id, `Creating staged image ${index + 1} of ${session.photos.length}.`, {
         stage: "editing",
