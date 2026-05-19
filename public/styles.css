@@ -344,7 +344,7 @@ span {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .empty-gallery {
@@ -385,6 +385,9 @@ span {
   border-radius: 8px;
   overflow: hidden;
   box-shadow: var(--shadow);
+  display: grid;
+  grid-template-rows: auto 98px;
+  height: 100%;
 }
 
 .photo-card.working {
@@ -435,7 +438,9 @@ span {
   padding: 12px;
   display: grid;
   gap: 10px;
-  grid-template-rows: minmax(38px, auto) 38px;
+  grid-template-rows: 26px 38px;
+  align-content: start;
+  min-height: 98px;
 }
 
 .photo-title-row {
@@ -443,12 +448,20 @@ span {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+  min-height: 26px;
 }
 
 .photo-title-row strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photo-title-row span {
+  flex: 0 0 auto;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -459,21 +472,30 @@ span {
   border-radius: 8px;
   overflow: hidden;
   width: 100%;
+  height: 38px;
   min-height: 38px;
   align-self: end;
 }
 
 .segmented button {
+  -webkit-appearance: none;
+  appearance: none;
   border: 0;
   background: white;
   padding: 8px;
   cursor: pointer;
   color: var(--muted);
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 38px;
   font: inherit;
   font-size: 13px;
   font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .segmented button.active {

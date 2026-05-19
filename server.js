@@ -33,6 +33,7 @@ const OPENAI_LAYOUT_QA_ENABLED = (process.env.OPENAI_LAYOUT_QA_ENABLED || "true"
 const OPENAI_LAYOUT_QA_MODEL = process.env.OPENAI_LAYOUT_QA_MODEL || TEXT_MODEL;
 const OPENAI_LAYOUT_QA_TIMEOUT_MS = Number(process.env.OPENAI_LAYOUT_QA_TIMEOUT_MS || 5 * 60 * 1000);
 const OPENAI_LAYOUT_QA_RETRIES = Math.max(0, Number(process.env.OPENAI_LAYOUT_QA_RETRIES || 1));
+const OPENAI_LAYOUT_QA_SOFT_FAIL_ON_TIMEOUT = (process.env.OPENAI_LAYOUT_QA_SOFT_FAIL_ON_TIMEOUT || "true").toLowerCase() !== "false";
 const MAX_IMAGE_COUNT = Number(process.env.MAX_IMAGE_COUNT || 8);
 const MAX_JSON_BODY_BYTES = Number(process.env.MAX_JSON_BODY_BYTES || 32 * 1024 * 1024);
 const AUTO_LEARN_FROM_USAGE = (process.env.AUTO_LEARN_FROM_USAGE || "true").toLowerCase() !== "false";
@@ -55,6 +56,10 @@ function combineFeedback(existing, next) {
   if (!current) return incoming;
   if (!incoming) return current;
   return `${current}\n\nAdditional feedback:\n${incoming}`;
+}
+
+function isTimeoutError(error) {
+  return /timed out|timeout/i.test(String(error?.message || ""));
 }
 
 function id(prefix) {
@@ -758,15 +763,22 @@ async function pollOpenAIResponse(initialResponse, timeoutMs = OPENAI_RESPONSE_T
   return response;
 }
 
-function responsePayload({ model, input, tools, maxOutputTokens = OPENAI_DEFAULT_MAX_OUTPUT_TOKENS }) {
+function responsePayload({
+  model,
+  input,
+  tools,
+  maxOutputTokens = OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+  reasoningEffort = REASONING_EFFORT,
+  background = OPENAI_BACKGROUND_MODE
+}) {
   const payload = {
     model,
     input,
     max_output_tokens: maxOutputTokens
   };
   if (tools) payload.tools = tools;
-  if (REASONING_EFFORT) payload.reasoning = { effort: REASONING_EFFORT };
-  if (OPENAI_BACKGROUND_MODE) {
+  if (reasoningEffort) payload.reasoning = { effort: reasoningEffort };
+  if (background) {
     payload.background = true;
     payload.store = true;
   }
@@ -1133,8 +1145,13 @@ async function validateLayoutPreserved(photo, generatedDataUrl, item, attempt) {
         { type: "input_image", image_url: generatedDataUrl, detail: "high" }
       ]
     }],
-    maxOutputTokens: 1800
-  }), { responseTimeoutMs: OPENAI_LAYOUT_QA_TIMEOUT_MS });
+    maxOutputTokens: 1200,
+    reasoningEffort: "",
+    background: false
+  }), {
+    requestTimeoutMs: OPENAI_LAYOUT_QA_TIMEOUT_MS,
+    responseTimeoutMs: OPENAI_LAYOUT_QA_TIMEOUT_MS
+  });
   const parsed = parseJsonish(extractText(response), {
     pass: false,
     severity: "major",
@@ -1160,7 +1177,12 @@ async function generatePhotoEditWithLayoutGuard(session, photo, plan, item, feed
       ].join(" ")
       : "";
     const generatedDataUrl = await generatePhotoEdit(photo, plan, item, feedback, retryGuardrail);
-    if (!OPENAI_LAYOUT_QA_ENABLED) return generatedDataUrl;
+    if (!OPENAI_LAYOUT_QA_ENABLED) {
+      return {
+        dataUrl: generatedDataUrl,
+        layoutQa: { status: "disabled" }
+      };
+    }
     await recordProgress(session.id, `Checking staged image ${index + 1} against the original layout.`, {
       stage: "editing",
       photo_id: photo.id,
@@ -1169,7 +1191,30 @@ async function generatePhotoEditWithLayoutGuard(session, photo, plan, item, feed
       attempt: attempt + 1,
       qa: true
     });
-    const qa = await validateLayoutPreserved(photo, generatedDataUrl, item, attempt);
+    let qa;
+    try {
+      qa = await validateLayoutPreserved(photo, generatedDataUrl, item, attempt);
+    } catch (error) {
+      if (!OPENAI_LAYOUT_QA_SOFT_FAIL_ON_TIMEOUT || !isTimeoutError(error)) throw error;
+      await recordProgress(session.id, `Layout check timed out for staged image ${index + 1}. Showing the generated image for review instead of discarding it.`, {
+        stage: "editing",
+        photo_id: photo.id,
+        photo_index: index + 1,
+        total_photos: session.photos.length,
+        attempt: attempt + 1,
+        qa: true,
+        qa_status: "timeout_unverified",
+        error: error.message
+      });
+      return {
+        dataUrl: generatedDataUrl,
+        layoutQa: {
+          status: "timeout_unverified",
+          attempt: attempt + 1,
+          error: error.message
+        }
+      };
+    }
     if (qa.pass) {
       await recordProgress(session.id, `Layout check passed for staged image ${index + 1}.`, {
         stage: "editing",
@@ -1179,7 +1224,15 @@ async function generatePhotoEditWithLayoutGuard(session, photo, plan, item, feed
         attempt: attempt + 1,
         qa: true
       });
-      return generatedDataUrl;
+      return {
+        dataUrl: generatedDataUrl,
+        layoutQa: {
+          status: "passed",
+          attempt: attempt + 1,
+          severity: qa.severity,
+          issues: qa.issues
+        }
+      };
     }
     lastIssues = qa.issues.join("; ");
     const canRetry = attempt < OPENAI_LAYOUT_QA_RETRIES;
@@ -1230,7 +1283,7 @@ async function generateEdits(session, plan, feedback) {
         photo_index: index + 1,
         total_photos: session.photos.length
       });
-      const latest = await withProgressHeartbeat(
+      const edit = await withProgressHeartbeat(
         session.id,
         () => `Still creating staged image ${index + 1} of ${session.photos.length}.`,
         {
@@ -1242,7 +1295,7 @@ async function generateEdits(session, plan, feedback) {
         () => generatePhotoEditWithLayoutGuard(session, photo, plan, item, feedback, index),
       );
       await store.updatePhoto(photo.id, {
-        latest_data_url: latest,
+        latest_data_url: edit.dataUrl,
         room_label: item.room_label || photo.room_label || `Room ${index + 1}`,
         edit_history: [
           ...editHistory,
@@ -1250,6 +1303,7 @@ async function generateEdits(session, plan, feedback) {
             at: nowIso(),
             feedback: feedback || "",
             plan: item,
+            layout_qa: edit.layoutQa,
             generated: true
           }
         ]
@@ -1260,7 +1314,7 @@ async function generateEdits(session, plan, feedback) {
         photo_index: index + 1,
         total_photos: session.photos.length
       });
-      results.push({ photo_id: photo.id, generated: true });
+      results.push({ photo_id: photo.id, generated: true, layout_qa: edit.layoutQa });
     } catch (error) {
       await store.updatePhoto(photo.id, {
         latest_data_url: "",

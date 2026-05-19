@@ -75,6 +75,7 @@ OPENAI_LAYOUT_QA_ENABLED=true
 OPENAI_LAYOUT_QA_MODEL=
 OPENAI_LAYOUT_QA_TIMEOUT_MS=300000
 OPENAI_LAYOUT_QA_RETRIES=1
+OPENAI_LAYOUT_QA_SOFT_FAIL_ON_TIMEOUT=true
 OPENAI_DEFAULT_MAX_OUTPUT_TOKENS=8000
 OPENAI_RETRY_MAX_OUTPUT_TOKENS=16000
 OPENAI_EDIT_CONCURRENCY=2
@@ -103,5 +104,5 @@ The Railway CLI is not bundled with this project.
 
 - Photo data is stored as compressed data URLs for a compact MVP. For heavy production use, move images to object storage and keep only URLs in Postgres.
 - Long image generation jobs run asynchronously and the browser polls session status.
-- Generated photos are checked against the original before being saved; images that change fixed layout, windows, doors, counters, appliances, closets, or other permanent features are rejected and retried.
+- Generated photos are checked against the original before being saved; images that change fixed layout, windows, doors, counters, appliances, closets, or other permanent features are rejected and retried. If the QA checker itself times out, the generated image is kept visible for review instead of being discarded.
 - Customer feedback memory stores generalized staging lessons, not full private conversations.
