@@ -16,6 +16,11 @@ A Railway-ready chat app for staging empty NYC apartment photos with multiple Op
 
 The app uses the Responses API for planning and the Images edit endpoint for direct virtual-staging photo edits. The default configuration uses `gpt-5.5-pro` with `reasoning.effort=xhigh` for planning and `gpt-image-1.5` for edited image generation.
 
+## Documentation
+
+- [Architecture diagram](docs/architecture.md)
+- [Code walkthrough](docs/code-walkthrough.md)
+
 ## Local Setup
 
 ```bash
@@ -66,6 +71,9 @@ OPENAI_POLL_INTERVAL_MS=2500
 OPENAI_RESPONSE_TIMEOUT_MS=1200000
 OPENAI_HTTP_TIMEOUT_MS=180000
 OPENAI_AGENT_TIMEOUT_MS=600000
+OPENAI_PLANNING_SOFT_TIMEOUT_MS=180000
+OPENAI_PLANNING_MIN_AGENTS=2
+OPENAI_PLANNING_AGENT_CONCURRENCY=4
 OPENAI_SYNTHESIS_TIMEOUT_MS=600000
 OPENAI_EDIT_TIMEOUT_MS=600000
 OPENAI_AGENT_IMAGE_INPUTS=true
@@ -78,7 +86,7 @@ OPENAI_LAYOUT_QA_RETRIES=1
 OPENAI_LAYOUT_QA_SOFT_FAIL_ON_TIMEOUT=true
 OPENAI_DEFAULT_MAX_OUTPUT_TOKENS=8000
 OPENAI_RETRY_MAX_OUTPUT_TOKENS=16000
-OPENAI_EDIT_CONCURRENCY=2
+OPENAI_EDIT_CONCURRENCY=4
 RESUME_ACTIVE_SESSIONS_LIMIT=10
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 TRAINING_MEMORY_PATH=

@@ -22,6 +22,9 @@ const OPENAI_POLL_INTERVAL_MS = Number(process.env.OPENAI_POLL_INTERVAL_MS || 25
 const OPENAI_RESPONSE_TIMEOUT_MS = Number(process.env.OPENAI_RESPONSE_TIMEOUT_MS || 20 * 60 * 1000);
 const OPENAI_HTTP_TIMEOUT_MS = Number(process.env.OPENAI_HTTP_TIMEOUT_MS || 3 * 60 * 1000);
 const OPENAI_AGENT_TIMEOUT_MS = Number(process.env.OPENAI_AGENT_TIMEOUT_MS || 10 * 60 * 1000);
+const OPENAI_PLANNING_SOFT_TIMEOUT_MS = Number(process.env.OPENAI_PLANNING_SOFT_TIMEOUT_MS || 3 * 60 * 1000);
+const OPENAI_PLANNING_MIN_AGENTS = Math.max(1, Number(process.env.OPENAI_PLANNING_MIN_AGENTS || 2));
+const OPENAI_PLANNING_AGENT_CONCURRENCY = Math.max(1, Number(process.env.OPENAI_PLANNING_AGENT_CONCURRENCY || 4));
 const OPENAI_SYNTHESIS_TIMEOUT_MS = Number(process.env.OPENAI_SYNTHESIS_TIMEOUT_MS || 10 * 60 * 1000);
 const OPENAI_EDIT_TIMEOUT_MS = Number(process.env.OPENAI_EDIT_TIMEOUT_MS || 10 * 60 * 1000);
 const OPENAI_DEFAULT_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_DEFAULT_MAX_OUTPUT_TOKENS || 8000);
@@ -40,7 +43,7 @@ const AUTO_LEARN_FROM_USAGE = (process.env.AUTO_LEARN_FROM_USAGE || "true").toLo
 const MAX_USAGE_EXAMPLES_IN_PROMPT = Number(process.env.MAX_USAGE_EXAMPLES_IN_PROMPT || 8);
 const MAX_USAGE_LESSONS_IN_PROMPT = Number(process.env.MAX_USAGE_LESSONS_IN_PROMPT || 24);
 const MAX_USAGE_LESSONS_PER_EXAMPLE = Number(process.env.MAX_USAGE_LESSONS_PER_EXAMPLE || 6);
-const OPENAI_EDIT_CONCURRENCY = Math.max(1, Number(process.env.OPENAI_EDIT_CONCURRENCY || 2));
+const OPENAI_EDIT_CONCURRENCY = Math.max(1, Number(process.env.OPENAI_EDIT_CONCURRENCY || 4));
 const RESUME_ACTIVE_SESSIONS_LIMIT = Math.max(0, Number(process.env.RESUME_ACTIVE_SESSIONS_LIMIT || 10));
 
 const jobs = new Set();
@@ -933,6 +936,116 @@ async function runAgent(role, session, memories, usageExamples, feedback) {
   }
 }
 
+async function runPlanningAgents(roles, session, memories, usageExamples, feedback) {
+  const agentConcurrency = Math.min(roles.length, OPENAI_PLANNING_AGENT_CONCURRENCY);
+  const minAgents = Math.min(roles.length, OPENAI_PLANNING_MIN_AGENTS);
+  const softTimeout = Math.max(0, OPENAI_PLANNING_SOFT_TIMEOUT_MS);
+  const outputs = [];
+  const completedRoles = new Set();
+  const startedRoles = new Set();
+  const pending = new Map();
+  const softTimeoutMarker = Symbol("planning-soft-timeout");
+  const startedAt = Date.now();
+  let nextRoleIndex = 0;
+  let usedSoftTimeout = false;
+
+  function startNextAgent() {
+    if (nextRoleIndex >= roles.length) return;
+    const role = roles[nextRoleIndex];
+    nextRoleIndex += 1;
+    startedRoles.add(role);
+    const promise = runAgent(role, session, memories, usageExamples, feedback)
+      .then((output) => {
+        completedRoles.add(role);
+        outputs.push(output);
+        return output;
+      })
+      .finally(() => {
+        pending.delete(promise);
+      });
+    pending.set(promise, role);
+  }
+
+  function fillAgentPool() {
+    while (nextRoleIndex < roles.length && pending.size < agentConcurrency) {
+      startNextAgent();
+    }
+  }
+
+  fillAgentPool();
+  while (pending.size || nextRoleIndex < roles.length) {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= softTimeout && outputs.length >= minAgents) {
+      usedSoftTimeout = true;
+      break;
+    }
+
+    if (!pending.size) {
+      fillAgentPool();
+      continue;
+    }
+
+    const waitForAgent = Promise.race([...pending.keys()]);
+    const remainingMs = softTimeout - elapsed;
+    const result = remainingMs > 0
+      ? await Promise.race([
+        waitForAgent,
+        sleep(remainingMs).then(() => softTimeoutMarker)
+      ])
+      : await waitForAgent;
+
+    if (result === softTimeoutMarker && outputs.length >= minAgents) {
+      usedSoftTimeout = true;
+      break;
+    }
+
+    fillAgentPool();
+  }
+
+  const completedOutputs = outputs.slice();
+  const incompleteRoles = roles.filter((role) => !completedRoles.has(role));
+  if (usedSoftTimeout && incompleteRoles.length) {
+    await recordProgress(
+      session.id,
+      `Planning quorum reached (${completedOutputs.length}/${roles.length}); synthesizing while slower agents continue in the background.`,
+      {
+        stage: "planning",
+        completed_agents: completedOutputs.length,
+        total_agents: roles.length,
+        min_agents: minAgents,
+        deferred_roles: incompleteRoles,
+        soft_timeout_ms: softTimeout
+      }
+    );
+  }
+
+  const deferredOutputs = incompleteRoles.map((role) => ({
+    role,
+    text: [
+      startedRoles.has(role)
+        ? "This specialist was still running after the planning soft timeout, so synthesis proceeded without waiting for it."
+        : "This specialist was not started before the planning quorum was reached.",
+      "Use conservative premium virtual-staging defaults: preserve all architecture, keep circulation clear, use cohesive warm-modern luxury furniture, keep windows and doors unobstructed, and prioritize spacious listing appeal."
+    ].join("\n"),
+    timed_out: true,
+    deferred: true
+  }));
+
+  if (usedSoftTimeout && pending.size) {
+    const pendingRoles = [...pending.values()];
+    Promise.allSettled([...pending.keys()])
+      .then(() => recordProgress(session.id, "Deferred planning agents finished after synthesis had already started.", {
+        stage: "planning",
+        deferred_roles: pendingRoles
+      }))
+      .catch((error) => {
+        console.error(`Deferred planning progress failed for ${session.id}: ${error.message}`);
+      });
+  }
+
+  return [...completedOutputs, ...deferredOutputs];
+}
+
 function fallbackPlan(session, feedback = "") {
   return {
     summary: OPENAI_API_KEY
@@ -1032,9 +1145,12 @@ async function generatePlan(session, feedback) {
     stage: "planning",
     photos: session.photos.length,
     roles: roles.length,
-    timeout_ms: OPENAI_AGENT_TIMEOUT_MS
+    timeout_ms: OPENAI_AGENT_TIMEOUT_MS,
+    agent_concurrency: Math.min(roles.length, OPENAI_PLANNING_AGENT_CONCURRENCY),
+    planning_soft_timeout_ms: OPENAI_PLANNING_SOFT_TIMEOUT_MS,
+    planning_min_agents: Math.min(roles.length, OPENAI_PLANNING_MIN_AGENTS)
   });
-  const agentOutputs = await Promise.all(roles.map((role) => runAgent(role, session, memories, usageExamples, feedback)));
+  const agentOutputs = await runPlanningAgents(roles, session, memories, usageExamples, feedback);
   const plan = await synthesizePlan(session, agentOutputs, memories, usageExamples, feedback);
   await recordProgress(session.id, "Design plan is ready. Moving to image generation.", {
     stage: "planning",
@@ -1350,6 +1466,11 @@ async function generateEdits(session, plan, feedback) {
   }
 
   const workerCount = Math.min(OPENAI_EDIT_CONCURRENCY, session.photos.length);
+  await recordProgress(session.id, `Generating staged images with ${workerCount} parallel worker${workerCount === 1 ? "" : "s"}.`, {
+    stage: "editing",
+    total_photos: session.photos.length,
+    edit_concurrency: workerCount
+  });
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   if (!results.some((result) => result.generated)) {
     const detail = results.find((result) => result.error)?.error || "no edited image output";
