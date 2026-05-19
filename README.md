@@ -19,6 +19,7 @@ The app uses the Responses API for planning and the Images edit endpoint for dir
 ## Documentation
 
 - [Architecture diagram](docs/architecture.md)
+- [Agent orchestration flow](docs/AgentOrchestrationFlow.md)
 - [Code walkthrough](docs/code-walkthrough.md)
 
 ## Local Setup
