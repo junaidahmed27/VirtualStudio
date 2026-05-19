@@ -115,8 +115,9 @@ The layout guard exists because the product requirement is strict: staged images
 - `pass`: save the staged image.
 - `fail`: reject and retry when retries remain.
 - timeout with soft fail enabled: save the staged image as `timeout_unverified` so the user can inspect it instead of seeing no output.
+- invalid JSON with soft fail enabled: save the staged image as `invalid_json_unverified` so a parser failure in the QA judge does not erase every reviewable output.
 
-Real QA failures still fail closed. The soft-fail behavior only applies when the checker itself times out.
+Real QA failures still fail closed. The soft-fail behavior only applies when the checker times out or returns an unreadable response.
 
 ## Feedback and Regeneration
 

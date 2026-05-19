@@ -37,6 +37,7 @@ const OPENAI_LAYOUT_QA_MODEL = process.env.OPENAI_LAYOUT_QA_MODEL || TEXT_MODEL;
 const OPENAI_LAYOUT_QA_TIMEOUT_MS = Number(process.env.OPENAI_LAYOUT_QA_TIMEOUT_MS || 5 * 60 * 1000);
 const OPENAI_LAYOUT_QA_RETRIES = Math.max(0, Number(process.env.OPENAI_LAYOUT_QA_RETRIES || 1));
 const OPENAI_LAYOUT_QA_SOFT_FAIL_ON_TIMEOUT = (process.env.OPENAI_LAYOUT_QA_SOFT_FAIL_ON_TIMEOUT || "true").toLowerCase() !== "false";
+const OPENAI_LAYOUT_QA_SOFT_FAIL_ON_INVALID_JSON = (process.env.OPENAI_LAYOUT_QA_SOFT_FAIL_ON_INVALID_JSON || "true").toLowerCase() !== "false";
 const MAX_IMAGE_COUNT = Number(process.env.MAX_IMAGE_COUNT || 8);
 const MAX_JSON_BODY_BYTES = Number(process.env.MAX_JSON_BODY_BYTES || 32 * 1024 * 1024);
 const AUTO_LEARN_FROM_USAGE = (process.env.AUTO_LEARN_FROM_USAGE || "true").toLowerCase() !== "false";
@@ -1237,6 +1238,7 @@ function layoutQaPrompt(item, attempt) {
   return [
     "Compare the original empty apartment photo against the virtually staged output.",
     "Return JSON only with this exact shape: {\"pass\": true|false, \"severity\": \"none|minor|major\", \"issues\": [\"...\"]}.",
+    "Do not include markdown, prose, code fences, comments, or any text outside the JSON object.",
     "PASS only when every fixed part of the apartment remains visually consistent with the original: room shape, camera perspective, crop, walls, floors, ceiling, windows, doors, closets, counters, cabinets, appliances, plumbing, radiators, outlets, trim, vents, fixtures, and built-ins.",
     "FAIL if any fixed feature disappears, moves, changes size, changes material/color, is replaced, is redrawn, or if the output changes the camera angle, crop, room proportions, lighting on fixed surfaces, or architecture.",
     "FAIL if furniture is implausible for the visible room type, blocks a door/window/closet/counter/appliance/walkway/radiator, or appears inside a closet, kitchen work zone, bathroom, entry hall, or narrow circulation area.",
@@ -1268,11 +1270,23 @@ async function validateLayoutPreserved(photo, generatedDataUrl, item, attempt) {
     requestTimeoutMs: OPENAI_LAYOUT_QA_TIMEOUT_MS,
     responseTimeoutMs: OPENAI_LAYOUT_QA_TIMEOUT_MS
   });
-  const parsed = parseJsonish(extractText(response), {
-    pass: false,
-    severity: "major",
-    issues: ["Layout QA did not return valid JSON."]
-  });
+  const parsed = parseJsonish(extractText(response), null);
+  if (!parsed || typeof parsed.pass !== "boolean") {
+    if (!OPENAI_LAYOUT_QA_SOFT_FAIL_ON_INVALID_JSON) {
+      return {
+        pass: false,
+        severity: "major",
+        issues: ["Layout QA did not return valid JSON."]
+      };
+    }
+    return {
+      pass: false,
+      severity: "unknown",
+      issues: ["Layout QA did not return valid JSON."],
+      unverified: true,
+      status: "invalid_json_unverified"
+    };
+  }
   const severity = cleanString(parsed.severity, 40).toLowerCase() || "major";
   const issues = cleanStringList(parsed.issues, 8, 240);
   return {
@@ -1328,6 +1342,28 @@ async function generatePhotoEditWithLayoutGuard(session, photo, plan, item, feed
           status: "timeout_unverified",
           attempt: attempt + 1,
           error: error.message
+        }
+      };
+    }
+    if (qa.unverified) {
+      await recordProgress(session.id, `Layout check returned unreadable QA for staged image ${index + 1}. Showing the generated image for review instead of discarding it.`, {
+        stage: "editing",
+        photo_id: photo.id,
+        photo_index: index + 1,
+        total_photos: session.photos.length,
+        attempt: attempt + 1,
+        qa: true,
+        qa_status: qa.status || "invalid_json_unverified",
+        severity: qa.severity,
+        issues: qa.issues
+      });
+      return {
+        dataUrl: generatedDataUrl,
+        layoutQa: {
+          status: qa.status || "invalid_json_unverified",
+          attempt: attempt + 1,
+          severity: qa.severity,
+          issues: qa.issues
         }
       };
     }
